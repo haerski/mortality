@@ -40,3 +40,6 @@ vignettes/*.pdf
 
 # tagfiles
 tags
+
+# for mac users
+.DS_Store
