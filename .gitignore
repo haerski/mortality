@@ -38,6 +38,10 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
+# knitted files
+*.html
+*.pdf
+
 # tagfiles
 tags
 
