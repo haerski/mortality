@@ -1,7 +1,5 @@
 ---
-title: "test"
-author: "Lei Yang"
-date: "7/12/2021"
+title: '1'
 output: html_document
 ---
 
@@ -28,7 +26,3 @@ plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-
-
-
-
