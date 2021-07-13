@@ -17,3 +17,4 @@ We also use [censusapi](https://www.hrecht.com/censusapi/). See the file `census
 * `acs/acs1` has data only for areas with population 65,000+. See [here](https://www.census.gov/programs-surveys/acs/geography-acs/areas-published.html) for the precises numbers.
 * `acs` doesn't seem to do ZIP codes, while `dec` does. We should think about how to join the data.
 * See the [Geography reference files](https://www.census.gov/geographies/reference-files.2020.html) for more info on geographies. Relationship files can be used to map e.g. counties to ZIP codes, and gazetteer files give information on the area, e.g. land surface area.
+* `cbp` contains payroll information wrt industry, company size, etc...
