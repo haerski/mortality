@@ -10,7 +10,9 @@ age10 %>% head()
 
 
 library("censusapi")
+Sys.setenv(CENSUS_KEY = "45f52e121ee946ea7a7cffac515e2981d1660bc9")
 Sys.setenv(CENSUS_KEY = "d7575c8e329c59a4e3368f616ec4559547c90aae")
+Sys.setenv(CENSUS_KEY = "b54b0de8847ce154578b56060a1646a8591f7314")
 apis <- listCensusApis() %>% tibble()
 
 apis %>%
@@ -34,3 +36,26 @@ pop <- getCensus(
   vintage = 2010,
   vars = c("NAME", "P001001", "H010001"),
   region = "zip code tabulation area:*")
+
+pop <- tibble(pop)
+pop %>%
+  arrange(desc(P001001))
+
+pop %>%
+  filter(zip_code_tabulation_area == "77449")
+
+
+acs_geo <- listCensusMetadata(
+  name = "acs/acs1",
+  vintage = 2019,
+  type = "geography"
+)
+
+
+pop_acs <- getCensus(
+                     name = "acs/acs1",
+                     vintage = 2019,
+                     vars = c("B01003_001E", "NAME"),
+                     region = "county:*")
+pop_acs %>%
+  filter(state == "13")
