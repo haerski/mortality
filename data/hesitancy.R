@@ -1,6 +1,10 @@
 library("tidyverse")
 library("feather")
 
+# Load the relationshop tibble
+zip3_rel <- read_feather("zip3_rel.feather")
+
+# Prepare the hesitancy dataset
 hes <- read_csv(
         "Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv",
         col_types = list(
@@ -28,7 +32,7 @@ hes <- read_csv(
         )
 )
 
-hes_clean <- hes %>%
+hes <- hes %>%
   rename(
          "hesitant" = `Estimated hesitant`,
          "svi" = `Social Vulnerability Index (SVI)`,
@@ -39,4 +43,18 @@ hes_clean <- hes %>%
   select(-`FIPS Code`, -fips) %>%
   relocate(state, county)
 
-write_feather(hes_clean, "vaccine_hesitancy.feather")
+
+# Aggregate by zip3. Here we take a weighted average by population in
+# the intersection of zip3 and county.
+hes_zip3 <- hes %>%
+  left_join(zip3_rel, by = c("state", "county")) %>%
+  drop_na() %>%
+  group_by(zip3) %>%
+  summarize(
+    across(hesitant:cvac, ~ sum(.x * POPPT / sum(POPPT))))
+
+# There are two counties with no matching zip code. We can see them here.
+# They will generate NANs
+anti_join(hes, zip3_rel, by = c("state", "county"))
+
+write_feather(hes_zip3, "vaccine_hesitancy.feather")
