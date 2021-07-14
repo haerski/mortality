@@ -1,0 +1,98 @@
+
+```{r}
+  install.packages("zipcodeR")
+```
+
+```{r}
+  library(zipcodeR)
+  library(dplyr)
+  library(tidyr)
+  library(readr)
+```
+
+Read data (county,FIPS)
+```{r}
+population <- read_csv("Population_Estimates.csv")
+vaccine <- read_csv("COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv")
+#death: from 01/01/2020 to 07/03/2021 total count
+death <- read_csv("Provisional_COVID-19_Death_Counts_in_the_United_States_by_County.csv")
+#education level percentage
+education <- read_csv("Education_Estimates.csv")
+poverty <-read_csv("Poverty_Estimates.csv")
+unemployment <- read_csv("Unemployment_Estimates.csv")
+hesitancy <- read_csv("Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv")
+```
+
+Read data (county name)
+```{r}
+lifeexpect <- read_csv("U.S._Life_Expectancy_at_Birth_by_State_and_Census_Tract_-_2010-2015.csv")
+```
+
+rename
+```{r}
+population <- population %>%
+              rename( FIPS = FIPStxt) %>%
+              rename( Population = POP_ESTIMATE_2019)%>%
+              rename (R_Birth = R_birth_2019)%>%
+              rename (R_death = R_death_2019)
+
+education <- education %>%
+  rename( FIPS = `FIPS Code`)%>%
+  rename (`less than high school` = `Percent of adults with less than a high school diploma, 2015-19`)%>%
+  rename (`high school` = `Percent of adults with a high school diploma only, 2015-19` )%>%
+  rename (`college` = `Percent of adults completing some college or associate's degree, 2015-19`)%>%
+  rename(`bachelor` = `Percent of adults with a bachelor's degree or higher, 2015-19`)
+
+hesitancy <- hesitancy %>%
+  rename( FIPS = `FIPS Code`)
+
+vaccine <- vaccine %>%
+  rename(seriescomplete = Series_Complete_Yes)%>%
+  rename(State = Recip_State)
+
+death <- death %>%
+  rename(FIPS = `FIPS County Code`)
+
+poverty <- poverty %>%
+  rename(FIPS = FIPStxt)%>%
+  rename(State= Stabr)
+
+unemployment <- unemployment %>%
+  rename(FIPS = FIPS_Code)
+```
+delete useless column
+```{r}
+education$`Area name`<-NULL
+hesitancy$`County Name`<-NULL
+vaccine$Recip_County<-NULL
+death$`Date as of`<-NULL
+death$`Start Date`<-NULL
+death$`End Date`<-NULL
+death$`County name`<-NULL
+unemployment$Area_name<-NULL
+```
+
+wired part: need several tries to delete area_name in poverty
+```{r}
+poverty$Area_name<-NULL
+```
+```{r}
+population$X11<-NULL
+hesitancy$State<-NULL
+death$Footnote<-NULL
+```
+
+
+Combine together 
+```{r}
+data <- merge(population,unemployment, by = c("FIPS","State"))
+data <- merge(data, poverty, by = c("FIPS","State"))
+data <- merge(data, death, by = c("FIPS","State"))
+data <- merge(data, hesitancy, by = c("FIPS"))
+data <- merge(data, education, by = c("FIPS","State"))
+```
+
+```{r}
+data%>%
+  filter(State == "DC")
+```
