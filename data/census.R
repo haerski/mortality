@@ -29,7 +29,7 @@ pop_sa <- getCensus(
                  region = "county:*",
                  vars = c("POP", "SEX", "AGEGROUP"),
                  DATE_CODE = 12)
-pop_sa <- tibble(pop_sa) %>% 
+pop_sa <- tibble(pop_sa) %>%
   select(-DATE_CODE)
 
 write_feather(pop_sa, "pop_sex_age.feather")
