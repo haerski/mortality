@@ -37,3 +37,13 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# knitted files
+*.html
+*.pdf
+
+# tagfiles
+tags
+
+# for mac users
+.DS_Store

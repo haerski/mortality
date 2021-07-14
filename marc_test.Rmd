@@ -1,6 +1,0 @@
-```{r}
-a + 1
-```
-
-Hello !
-Testing
