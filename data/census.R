@@ -34,3 +34,17 @@ pop_sa <- tibble(pop_sa) %>%
 
 write_feather(pop_sa, "pop_sex_age.feather")
 
+<<<<<<< HEAD
+<<<<<<< Updated upstream
+pop_acs <- getCensus(
+                     name = "acs/acs1",
+                     vintage = 2019,
+                     vars = c("B01003_001E", "NAME"),
+                     region = "county:*")
+pop_acs %>%
+  filter(state == "13")
+=======
+
+>>>>>>> Stashed changes
+=======
+>>>>>>> master
