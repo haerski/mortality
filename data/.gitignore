@@ -1,1 +1,6 @@
 *.csv
+*.xls
+*.xlsx
+*.feather
+*.asc
+*.txt

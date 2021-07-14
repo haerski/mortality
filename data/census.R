@@ -1,57 +1,40 @@
 library("tidyverse")
-library("tidycensus")
-
-census_api_key("d7575c8e329c59a4e3368f616ec4559547c90aae")
-
-age10 <- get_decennial(geography = "zcta",
-                       variables = "P013001",
-                       year = 2010)
-age10 %>% head()
-
-
 library("censusapi")
-Sys.setenv(CENSUS_KEY = "45f52e121ee946ea7a7cffac515e2981d1660bc9")
-Sys.setenv(CENSUS_KEY = "d7575c8e329c59a4e3368f616ec4559547c90aae")
+library("feather")
+
 Sys.setenv(CENSUS_KEY = "b54b0de8847ce154578b56060a1646a8591f7314")
 apis <- listCensusApis() %>% tibble()
 
-apis %>%
-  filter(vintage == 2010) %>%
-  View()
-
-census_vars <- listCensusMetadata(
-  name = "dec/sf1",
-  vintage = 2010,
-  type = "variables"
-)
-
-census_geo <- listCensusMetadata(
-  name = "dec/sf1",
-  vintage = 2010,
-  type = "geography"
-)
-
+# population
+# date_code = 12 is an estimate for July 1, 2019
+# total population + density
 pop <- getCensus(
-  name = "dec/sf1",
-  vintage = 2010,
-  vars = c("NAME", "P001001", "H010001"),
-  region = "zip code tabulation area:*")
-
-pop <- tibble(pop)
-pop %>%
-  arrange(desc(P001001))
-
-pop %>%
-  filter(zip_code_tabulation_area == "77449")
+                 name = "pep/population",
+                 vintage = 2019,
+                 region = "county:*",
+                 vars = c("POP", "DENSITY"),
+                 DATE_CODE = 12)
+pop <- tibble(pop) %>%
+  select(-DATE_CODE)
+write_feather(pop, "pop_den.feather")
 
 
-acs_geo <- listCensusMetadata(
-  name = "acs/acs1",
-  vintage = 2019,
-  type = "geography"
-)
 
 
+# population by sex and age
+# Ethnicity and race are not taken into account
+pop_sa <- getCensus(
+                 name = "pep/charagegroups",
+                 vintage = 2019,
+                 region = "county:*",
+                 vars = c("POP", "SEX", "AGEGROUP"),
+                 DATE_CODE = 12)
+pop_sa <- tibble(pop_sa) %>%
+  select(-DATE_CODE)
+
+write_feather(pop_sa, "pop_sex_age.feather")
+
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 pop_acs <- getCensus(
                      name = "acs/acs1",
@@ -63,3 +46,5 @@ pop_acs %>%
 =======
 
 >>>>>>> Stashed changes
+=======
+>>>>>>> master
