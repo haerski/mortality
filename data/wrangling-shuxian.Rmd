@@ -68,24 +68,41 @@ unemployment <- unemployment %>%
 ```
 delete useless column
 ```{r}
-education$`Area name`<-NULL
-hesitancy$`County Name`<-NULL
-vaccine$Recip_County<-NULL
+population$R_NATURAL_INC_2019<-NULL
+population$R_INTERNATIONAL_MIG_2019<-NULL
+population$R_DOMESTIC_MIG_2019<-NULL
+population$R_NET_MIG_2019<-NULL
+population$X11<-NULL
+
+unemployment$Area_name<-NULL
+unemployment$Med_HH_Income_Percent_of_State_Total_2019<-NULL
+
+poverty$Area_name<-NULL
+
 death$`Date as of`<-NULL
 death$`Start Date`<-NULL
 death$`End Date`<-NULL
 death$`County name`<-NULL
-unemployment$Area_name<-NULL
-```
-
-wired part: need several tries to delete area_name in poverty
-```{r}
-poverty$Area_name<-NULL
-```
-```{r}
-population$X11<-NULL
-hesitancy$State<-NULL
+death$`Urban Rural Code`<-NULL
 death$Footnote<-NULL
+
+hesitancy$`County Name`<-NULL
+hesitancy$State<-NULL
+hesitancy$`SVI Category`<-NULL
+hesitancy$`CVAC Level Of Concern`<-NULL
+hesitancy$`Percent Hispanic`<-NULL
+hesitancy$`Percent non-Hispanic American Indian/Alaska Native`<-NULL
+hesitancy$`Percent non-Hispanic Asian`<-NULL
+hesitancy$`Percent non-Hispanic Black`<-NULL
+hesitancy$`Percent non-Hispanic Native Hawaiian/Pacific Islander`<-NULL
+hesitancy$`Percent non-Hispanic White`<-NULL
+hesitancy$`Geographical Point`<-NULL
+hesitancy$`State Code`<-NULL
+hesitancy$`County Boundary`<-NULL
+hesitancy$`State Boundary`<-NULL
+
+education$`Area name`<-NULL
+vaccine$Recip_County<-NULL
 ```
 
 
@@ -96,12 +113,6 @@ data <- merge(data, poverty, by = c("FIPS","State"))
 data <- merge(data, death, by = c("FIPS","State"))
 data <- merge(data, hesitancy, by = c("FIPS"))
 data <- merge(data, education, by = c("FIPS","State"))
-```
-
-```{r}
-library("tidyverse")
-library("feather")
-library("zipcodeR")
 ```
 
 ```{r}
@@ -130,29 +141,6 @@ modifydata<- cleandata %>%
 ```{r}
 head(modifydata)
 ```
-delete data
-```{r}
-modifydata$R_NATURAL_INC_2019<-NULL
-modifydata$R_INTERNATIONAL_MIG_2019<-NULL
-modifydata$R_DOMESTIC_MIG_2019<-NULL
-modifydata$R_NET_MIG_2019<-NULL
-modifydata$Med_HH_Income_Percent_of_State_Total_2019<-NULL
-modifydata$`Urban Rural Code`<-NULL
-modifydata$`Percent Hispanic`<-NULL
-modifydata$`Percent non-Hispanic American Indian/Alaska Native`<-NULL
-modifydata$`Percent non-Hispanic Asian`<-NULL
-modifydata$`Percent non-Hispanic Black`<-NULL
-modifydata$`Percent non-Hispanic Native Hawaiian/Pacific Islander`<-NULL
-modifydata$`Percent non-Hispanic White`<-NULL
-modifydata$`Geographical Point`<-NULL
-modifydata$`State Code`<-NULL
-modifydata$`County Boundary`<-NULL
-modifydata$`State Boundary`<-NULL
-```
-
-```{r}
-head(modifydata)
-```
 #Median_Household_Income_2019
 #Deaths involving COVID-19 to death rate
 #Deaths from All Causes to death rate
@@ -160,12 +148,28 @@ head(modifydata)
 ```{r}
 finaldata<-modifydata %>%
   group_by(zip3)%>%
-  summarize(RBirth = sum(R_Birth*Population)/sum(Population),Rdeath = sum(R_death*Population)/sum(Population), Unemploymentrate2019 = sum(Unemployment_rate_2019 * Population / sum(Population)),Unemploymentrate2020 = sum(Unemployment_rate_2020*Population)/sum(Population),Povertypercent2019 = sum(PCTPOVALL_2019*Population)/sum(Population),Povertypercent2019 = sum(PCTPOVALL_2019*Population)/sum(Population), Death_rate_involvingCOVID = sum(`Deaths involving COVID-19`)/sum(Population), Death_rate_allcause = sum(`Deaths from All Causes`)/sum(Population), estimated_hesitant =sum(`Estimated hesitant`*Population)/sum(Population),estimated_hesitant_orunsure =sum(`Estimated hesitant or unsure`*Population)/sum(Population), estimated_stronghesitant =sum(`Estimated strongly hesitant`*Population)/sum(Population), Social_Vulnerability_Index= sum(`Social Vulnerability Index (SVI)`*Population)/sum(Population), Percent_adult_vaccine = sum(`Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`*Population)/sum(Population), less_than_high_shool = sum(`less than high school`*Population)/sum(Population), high_school = sum(`high school`*Population)/sum(Population),college_level = sum(college*Population)/sum(Population), bachelor_level = sum(bachelor*Population)/sum(Population))
+  summarize(RBirth = sum(R_Birth*Population)/sum(Population),
+            Rdeath = sum(R_death*Population)/sum(Population),
+            Unemploymentrate2019 = sum(Unemployment_rate_2019 * Population / sum(Population)),
+            Unemploymentrate2020 = sum(Unemployment_rate_2020*Population)/sum(Population),
+            Povertypercent2019 = sum(PCTPOVALL_2019*Population)/sum(Population),
+            Povertypercent2019 = sum(PCTPOVALL_2019*Population)/sum(Population), 
+            Death_rate_involvingCOVID = sum(`Deaths involving COVID-19`)/sum(Population),
+            Death_rate_allcause = sum(`Deaths from All Causes`)/sum(Population), 
+            estimated_hesitant =sum(`Estimated hesitant`*Population)/sum(Population),
+            estimated_hesitant_orunsure =sum(`Estimated hesitant or unsure`*Population)/sum(Population),
+            estimated_stronghesitant =sum(`Estimated strongly hesitant`*Population)/sum(Population),
+            Social_Vulnerability_Index= sum(`Social Vulnerability Index (SVI)`*Population)/sum(Population),
+            Percent_adult_vaccine = sum(`Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`*Population)/sum(Population), 
+            less_than_high_shool = sum(`less than high school`*Population)/sum(Population), 
+            high_school = sum(`high school`*Population)/sum(Population),
+            college_level = sum(college*Population)/sum(Population), 
+            bachelor_level = sum(bachelor*Population)/sum(Population))
 ```
 
-```{r}
-
-```
 ```{r}
 head(finaldata)
+```
+```{r}
+write.csv(finaldata,'Finaldata.csv')
 ```
