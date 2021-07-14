@@ -8,15 +8,20 @@
   library(dplyr)
   library(tidyr)
   library(readr)
+  library(tidyverse)
+  library(censusapi)
+  library(feather)
 ```
 
 Read data (county,FIPS)
+
+
 ```{r}
 population <- read_csv("Population_Estimates.csv")
 vaccine <- read_csv("COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv")
 #death: from 01/01/2020 to 07/03/2021 total count
 death <- read_csv("Provisional_COVID-19_Death_Counts_in_the_United_States_by_County.csv")
-#education level percentage
+#education level percentage 15-19
 education <- read_csv("Education_Estimates.csv")
 poverty <-read_csv("Poverty_Estimates.csv")
 unemployment <- read_csv("Unemployment_Estimates.csv")
@@ -27,6 +32,7 @@ Read data (county name)
 ```{r}
 lifeexpect <- read_csv("U.S._Life_Expectancy_at_Birth_by_State_and_Census_Tract_-_2010-2015.csv")
 ```
+
 
 rename
 ```{r}
@@ -92,9 +98,74 @@ data <- merge(data, hesitancy, by = c("FIPS"))
 data <- merge(data, education, by = c("FIPS","State"))
 ```
 
+```{r}
+library("tidyverse")
+library("feather")
+library("zipcodeR")
+```
 
-Choose the first three month vaccine data
+```{r}
+# wrangling here
+#pop <- read_feather("pop_den.feather")
+get_zip3_list <- function(state, county) {
+  search_fips(state, county) %>%
+  filter(!is.na(population)) %>%
+  transmute(zip3 = str_sub(zipcode, 1, 3)) %>%
+  unique()
+}
+```
+```{r}
+cleandata<- data %>%
+  mutate(countyFIPS=as.character(FIPS)) %>%
+  mutate(countyFIPS=str_pad(FIPS,5,pad="0")) %>% 
+  mutate(state=str_sub(FIPS,1,2),county=str_sub(FIPS,3,5)) %>% 
+  select(-countyFIPS)
+```
+```{r}
+modifydata<- cleandata %>%
+  mutate(zip3list = map2(state, county, get_zip3_list)) %>%
+  unnest(cols = c(zip3list)) %>%
+  group_by(zip3)
+```
+```{r}
+head(modifydata)
+```
+delete data
+```{r}
+modifydata$R_NATURAL_INC_2019<-NULL
+modifydata$R_INTERNATIONAL_MIG_2019<-NULL
+modifydata$R_DOMESTIC_MIG_2019<-NULL
+modifydata$R_NET_MIG_2019<-NULL
+modifydata$Med_HH_Income_Percent_of_State_Total_2019<-NULL
+modifydata$`Urban Rural Code`<-NULL
+modifydata$`Percent Hispanic`<-NULL
+modifydata$`Percent non-Hispanic American Indian/Alaska Native`<-NULL
+modifydata$`Percent non-Hispanic Asian`<-NULL
+modifydata$`Percent non-Hispanic Black`<-NULL
+modifydata$`Percent non-Hispanic Native Hawaiian/Pacific Islander`<-NULL
+modifydata$`Percent non-Hispanic White`<-NULL
+modifydata$`Geographical Point`<-NULL
+modifydata$`State Code`<-NULL
+modifydata$`County Boundary`<-NULL
+modifydata$`State Boundary`<-NULL
+```
+
+```{r}
+head(modifydata)
+```
+#Median_Household_Income_2019
+#Deaths involving COVID-19 to death rate
+#Deaths from All Causes to death rate
+#SVI Category 
+```{r}
+finaldata<-modifydata %>%
+  group_by(zip3)%>%
+  summarize(RBirth = sum(R_Birth*Population)/sum(Population),Rdeath = sum(R_death*Population)/sum(Population), Unemploymentrate2019 = sum(Unemployment_rate_2019 * Population / sum(Population)),Unemploymentrate2020 = sum(Unemployment_rate_2020*Population)/sum(Population),Povertypercent2019 = sum(PCTPOVALL_2019*Population)/sum(Population),Povertypercent2019 = sum(PCTPOVALL_2019*Population)/sum(Population), Death_rate_involvingCOVID = sum(`Deaths involving COVID-19`)/sum(Population), Death_rate_allcause = sum(`Deaths from All Causes`)/sum(Population), estimated_hesitant =sum(`Estimated hesitant`*Population)/sum(Population),estimated_hesitant_orunsure =sum(`Estimated hesitant or unsure`*Population)/sum(Population), estimated_stronghesitant =sum(`Estimated strongly hesitant`*Population)/sum(Population), Social_Vulnerability_Index= sum(`Social Vulnerability Index (SVI)`*Population)/sum(Population), Percent_adult_vaccine = sum(`Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`*Population)/sum(Population), less_than_high_shool = sum(`less than high school`*Population)/sum(Population), high_school = sum(`high school`*Population)/sum(Population),college_level = sum(college*Population)/sum(Population), bachelor_level = sum(bachelor*Population)/sum(Population))
+```
 
 ```{r}
 
+```
+```{r}
+head(finaldata)
 ```
