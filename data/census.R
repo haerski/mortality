@@ -52,6 +52,7 @@ acs_geo <- listCensusMetadata(
 )
 
 
+<<<<<<< Updated upstream
 pop_acs <- getCensus(
                      name = "acs/acs1",
                      vintage = 2019,
@@ -59,3 +60,6 @@ pop_acs <- getCensus(
                      region = "county:*")
 pop_acs %>%
   filter(state == "13")
+=======
+
+>>>>>>> Stashed changes
