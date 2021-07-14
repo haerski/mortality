@@ -92,7 +92,9 @@ data <- merge(data, hesitancy, by = c("FIPS"))
 data <- merge(data, education, by = c("FIPS","State"))
 ```
 
+
+Choose the first three month vaccine data
+
 ```{r}
-data%>%
-  filter(State == "DC")
+
 ```
