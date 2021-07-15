@@ -16,7 +16,7 @@ education <- read_csv("Education_Estimates.csv")
 poverty <- read_csv("Poverty_Estimates.csv")
 unemployment <- read_csv("Unemployment_Estimates.csv")
 hesitancy <- read_csv("Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv")
-election <- read_csv("countypres_2000-2020.csv")%>%
+election <- read_csv("countypres_2000-2020.csv") %>%
   filter(year == 2020)
 ```
 
@@ -37,7 +37,7 @@ population <- population %>%
 education <- education %>%
   rename(FIPS = `FIPS Code`,
          `less than high school` = `Percent of adults with less than a high school diploma, 2015-19`,
-         `high school` = `Percent of adults with a high school diploma only, 2015-19` ,
+         `high school` = `Percent of adults with a high school diploma only, 2015-19`,
          `college` = `Percent of adults completing some college or associate's degree, 2015-19`,
          `bachelor` = `Percent of adults with a bachelor's degree or higher, 2015-19`)
 
@@ -145,7 +145,8 @@ election<-election%>%
   summarise(candidatevotes=sum(candidatevotes),totalvotes= totalvotes)%>%
   distinct()%>%
   pivot_wider(names_from = party,values_from =candidatevotes)%>%
-  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes)
+  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes) %>%
+  mutate(FIPS = str_pad(as.character(FIPS), 5, pad = "0"))
 ```
 
 Combine together, education has the most counties. There will be lots of NANs!!
@@ -184,14 +185,13 @@ modifydata <- cleandata %>%
   relocate(Median_Household_Income_2019, .before = zip3) %>%
   mutate(Population = NULL) %>%
   summarize(
-            across(`less than high school`:`Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`, ~ sum(.x * POPPT / sum(POPPT, na.rm = TRUE), na.rm = TRUE)),
+            across(`less than high school`:`Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`, ~ sum(.x * POPPT / sum(POPPT, na.rm = TRUE), na.rm = TRUE)), #mistake
             Median_Household_Income_2019 = sum(Median_Household_Income_2019 * HUPT / sum(HUPT, na.rm = TRUE), na.rm = TRUE),
             POP = sum(POPPT),
             HU = sum(HUPT),
             AREA = sum(AREAPT),
             AREALAND = sum(AREALANDPT)) %>%
   filter(!zip3 %in% c("006", "007", "009"))
-
 ```
 
 
