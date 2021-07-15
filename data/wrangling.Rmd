@@ -16,6 +16,8 @@ education <- read_csv("Education_Estimates.csv")
 poverty <- read_csv("Poverty_Estimates.csv")
 unemployment <- read_csv("Unemployment_Estimates.csv")
 hesitancy <- read_csv("Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv")
+election <- read_csv("countypres_2000-2020.csv")%>%
+  filter(year == 2020)
 ```
 
 Read data (county name)
@@ -55,6 +57,9 @@ poverty <- poverty %>%
 
 unemployment <- unemployment %>%
   rename(FIPS = FIPS_Code)
+
+election <-election%>%
+  rename(FIPS = county_fips)
 ```
 
 delete useless column
@@ -133,8 +138,15 @@ hesitancy <- hesitancy %>%
 
 education <- education %>%
   mutate(FIPS = str_pad(as.character(FIPS), 5, pad = "0"))
-```
 
+election<-election%>%
+  select(FIPS, party, candidatevotes,totalvotes)%>%
+  group_by(FIPS,party)%>%
+  summarise(candidatevotes=sum(candidatevotes),totalvotes= totalvotes)%>%
+  distinct()%>%
+  pivot_wider(names_from = party,values_from =candidatevotes)%>%
+  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes)
+```
 
 Combine together, education has the most counties. There will be lots of NANs!!
 ```{r}
@@ -143,6 +155,7 @@ data <- education %>%
   left_join(unemployment, by = "FIPS") %>%
   left_join(poverty, by = "FIPS") %>%
   left_join(death, by = "FIPS") %>%
+  left_join(election, by = "FIPS") %>%
   left_join(hesitancy, by = "FIPS")
 ```
 
