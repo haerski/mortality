@@ -26,6 +26,8 @@ education <- read_csv("Education_Estimates.csv")
 poverty <-read_csv("Poverty_Estimates.csv")
 unemployment <- read_csv("Unemployment_Estimates.csv")
 hesitancy <- read_csv("Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv")
+election <- read_csv("countypres_2000-2020.csv")%>%
+  filter(year == 2020)
 ```
 
 Read data (county name)
@@ -65,6 +67,9 @@ poverty <- poverty %>%
 
 unemployment <- unemployment %>%
   rename(FIPS = FIPS_Code)
+
+election <-election%>%
+  rename(FIPS = county_fips)
 ```
 
 delete useless column
@@ -113,8 +118,21 @@ education$State<-NULL
 vaccine$Recip_County<-NULL
 vaccine$State<-NULL
 
+election<-election%>%
+  select(FIPS, party, candidatevotes,totalvotes)
 ```
-
+```{r}
+election%>%
+  filter(FIPS==4003)
+```
+```{r}
+election<-election%>%
+  group_by(FIPS,party)%>%
+  summarise(candidatevotes=sum(candidatevotes),totalvotes= totalvotes)%>%
+  distinct()%>%
+  pivot_wider(names_from = party,values_from =candidatevotes)%>%
+  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes)
+```
 
 Combine together 
 ```{r}
@@ -123,6 +141,7 @@ data <- merge(data, poverty, by = c("FIPS"))
 data <- merge(data, death, by = c("FIPS"))
 data <- merge(data, hesitancy, by = c("FIPS"))
 data <- merge(data, education, by = c("FIPS"))
+data <- merge(data,election, by = c("FIPS"))
 ```
 
 Change FIPS to zip3
@@ -150,7 +169,7 @@ modifydata<-cleandata%>%
   drop_na() %>%
   group_by(zip3) %>%
   summarize(
-    across(Population:bachelor, ~ sum(.x * POPPT / sum(POPPT))))
+    across(Population:per_lib, ~ sum(.x * POPPT / sum(POPPT))))
 ```
 
 
@@ -160,4 +179,5 @@ head(modifydata)
 
 ```{r}
 write.csv(modifydata,'modifydata.csv')
+write_feather(modifydata,'modifydata.feather')
 ```
