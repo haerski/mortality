@@ -179,7 +179,7 @@ head(cleandata)
 Clean up and aggregate by zip3. We take the weighted average of variables. Every variable will be weighted by population except household income, which will be weighted by number of households. We also remove Puerto Rico and Virgin Islands. N/A values will be ignored in our weighting.
 ```{r}
 modifydata <- cleandata %>%
-  left_join(zip3_rel, by = c("state", "county")) %>%
+  inner_join(zip3_rel, by = c("state", "county")) %>%
   group_by(zip3) %>%
   relocate(Median_Household_Income_2019, .before = zip3) %>%
   mutate(Population = NULL) %>%
