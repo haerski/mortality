@@ -33,4 +33,3 @@ pop_sa <- tibble(pop_sa) %>%
   select(-DATE_CODE)
 
 write_feather(pop_sa, "pop_sex_age.feather")
-
