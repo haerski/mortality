@@ -1,3 +1,12 @@
+# Joining by zip3
+Most of the data we obtain will be by county.
+The tibble stored in `zip3_rel.feather` contains informations about intersections
+of counties and ZIP3 codes. The variables are
+* state, county, zip3: character strings
+* POPPT, HUPT, AREAPT, AREALANDPT: population, housing units, area and land area in each intersection of county and zip3.
+
+These variables can be used to take weighted averages e.g. by population or area. See `hesitancy.R` for an example.
+
 # Vaccine hesitancy data
 See [this story from the CDC](https://data.cdc.gov/stories/s/Vaccine-Hesitancy-for-COVID-19/cnd2-a6zw).
 Contains PUMA-level estimation for vaccine hesitancy, along with county-level information of other data.
