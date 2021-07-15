@@ -160,4 +160,5 @@ head(modifydata)
 
 ```{r}
 write.csv(modifydata,'modifydata.csv')
+write_feather(modifydata ,"other_data.feather")
 ```
