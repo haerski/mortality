@@ -1,0 +1,183 @@
+
+```{r}
+  install.packages("zipcodeR")
+```
+
+```{r}
+  library(zipcodeR)
+  library(dplyr)
+  library(tidyr)
+  library(readr)
+  library(tidyverse)
+  library(censusapi)
+  library(feather)
+```
+
+Read data (county,FIPS)
+
+
+```{r}
+population <- read_csv("Population_Estimates.csv")
+vaccine <- read_csv("COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv")
+#death: from 01/01/2020 to 07/03/2021 total count
+death <- read_csv("Provisional_COVID-19_Death_Counts_in_the_United_States_by_County.csv")
+#education level percentage 15-19
+education <- read_csv("Education_Estimates.csv")
+poverty <-read_csv("Poverty_Estimates.csv")
+unemployment <- read_csv("Unemployment_Estimates.csv")
+hesitancy <- read_csv("Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv")
+election <- read_csv("countypres_2000-2020.csv")%>%
+  filter(year == 2020)
+```
+
+Read data (county name)
+```{r}
+lifeexpect <- read_csv("U.S._Life_Expectancy_at_Birth_by_State_and_Census_Tract_-_2010-2015.csv")
+```
+
+
+rename
+```{r}
+population <- population %>%
+              rename( FIPS = FIPStxt) %>%
+              rename( Population = POP_ESTIMATE_2019)%>%
+              rename (R_Birth = R_birth_2019)%>%
+              rename (R_death = R_death_2019)
+
+education <- education %>%
+  rename( FIPS = `FIPS Code`)%>%
+  rename (`less than high school` = `Percent of adults with less than a high school diploma, 2015-19`)%>%
+  rename (`high school` = `Percent of adults with a high school diploma only, 2015-19` )%>%
+  rename (`college` = `Percent of adults completing some college or associate's degree, 2015-19`)%>%
+  rename(`bachelor` = `Percent of adults with a bachelor's degree or higher, 2015-19`)
+
+hesitancy <- hesitancy %>%
+  rename( FIPS = `FIPS Code`)
+
+vaccine <- vaccine %>%
+  rename(seriescomplete = Series_Complete_Yes)%>%
+  rename(State = Recip_State)
+
+death <- death %>%
+  rename(FIPS = `FIPS County Code`)
+
+poverty <- poverty %>%
+  rename(FIPS = FIPStxt)%>%
+  rename(State= Stabr)
+
+unemployment <- unemployment %>%
+  rename(FIPS = FIPS_Code)
+
+election <-election%>%
+  rename(FIPS = county_fips)
+```
+
+delete useless column
+```{r}
+population$R_NATURAL_INC_2019<-NULL
+population$R_INTERNATIONAL_MIG_2019<-NULL
+population$R_DOMESTIC_MIG_2019<-NULL
+population$R_NET_MIG_2019<-NULL
+population$X11<-NULL
+population$State<-NULL
+population$Area_Name<-NULL
+
+unemployment$Area_name<-NULL
+unemployment$Med_HH_Income_Percent_of_State_Total_2019<-NULL
+unemployment$State<-NULL
+
+poverty$Area_name<-NULL
+poverty$State<-NULL
+
+death$`Date as of`<-NULL
+death$`Start Date`<-NULL
+death$`End Date`<-NULL
+death$`County name`<-NULL
+death$`Urban Rural Code`<-NULL
+death$Footnote<-NULL
+death$State<-NULL
+
+hesitancy$`County Name`<-NULL
+hesitancy$State<-NULL
+hesitancy$`SVI Category`<-NULL
+hesitancy$`CVAC Level Of Concern`<-NULL
+hesitancy$`Percent Hispanic`<-NULL
+hesitancy$`Percent non-Hispanic American Indian/Alaska Native`<-NULL
+hesitancy$`Percent non-Hispanic Asian`<-NULL
+hesitancy$`Percent non-Hispanic Black`<-NULL
+hesitancy$`Percent non-Hispanic Native Hawaiian/Pacific Islander`<-NULL
+hesitancy$`Percent non-Hispanic White`<-NULL
+hesitancy$`Geographical Point`<-NULL
+hesitancy$`State Code`<-NULL
+hesitancy$`County Boundary`<-NULL
+hesitancy$`State Boundary`<-NULL
+
+education$`Area name`<-NULL
+education$State<-NULL
+
+vaccine$Recip_County<-NULL
+vaccine$State<-NULL
+
+election<-election%>%
+  select(FIPS, party, candidatevotes,totalvotes)
+```
+```{r}
+election%>%
+  filter(FIPS==4003)
+```
+```{r}
+election<-election%>%
+  group_by(FIPS,party)%>%
+  summarise(candidatevotes=sum(candidatevotes),totalvotes= totalvotes)%>%
+  distinct()%>%
+  pivot_wider(names_from = party,values_from =candidatevotes)%>%
+  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes)
+```
+
+Combine together 
+```{r}
+data <- merge(population,unemployment, by = c("FIPS"))
+data <- merge(data, poverty, by = c("FIPS"))
+data <- merge(data, death, by = c("FIPS"))
+data <- merge(data, hesitancy, by = c("FIPS"))
+data <- merge(data, education, by = c("FIPS"))
+data <- merge(data,election, by = c("FIPS"))
+```
+
+Change FIPS to zip3
+```{r}
+# Load the relationshop tibble
+zip3_rel <- read_feather("zip3_rel.feather")
+```
+
+```{r}
+cleandata<- data %>%
+  mutate(countyFIPS=as.character(FIPS)) %>%
+  mutate(countyFIPS=str_pad(FIPS,5,pad="0")) %>% 
+  mutate(state=str_sub(FIPS,1,2),county=str_sub(FIPS,3,5)) %>% 
+  select(-`FIPS`,-`countyFIPS`) %>%
+  relocate(state, county)
+```
+
+```{r}
+head(cleandata)
+```
+
+```{r}
+modifydata<-cleandata%>%
+  left_join(zip3_rel, by = c("state", "county")) %>%
+  drop_na() %>%
+  group_by(zip3) %>%
+  summarize(
+    across(Population:per_lib, ~ sum(.x * POPPT / sum(POPPT))))
+```
+
+
+```{r}
+head(modifydata)
+```
+
+```{r}
+write.csv(modifydata,'modifydata.csv')
+write_feather(modifydata,'modifydata.feather')
+```
