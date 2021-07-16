@@ -1,0 +1,451 @@
+```{r}
+  library(tidyverse)
+  library(feather)
+  library(caret)
+  library(ggplot2)
+```
+
+Read simulate data
+```{r}
+  experience <- readRDS("simulation_data/experience_weekly_1.RDS")
+  experience$death[experience$death==2] <- 1
+  
+  person <-readRDS("simulation_data/person_1.RDS")
+```
+
+
+k-month ae value for 2019. for any k, around 10% client's ae is over the threshold 1.1.
+Here we choose k = 1 for the following work.
+```{r}
+  k = 12
+  test2019 <- experience %>%
+    filter(year == 2019)%>%
+    left_join(person, by = c("client", "participant"))%>%
+    select(-zip3, -industry, -Age, -collar, -Sex, -year)%>%
+    mutate(kmonth = (month-1) %/% k)%>%
+    group_by(client, participant, kmonth)%>%
+    summarise(actual = sum(death) * FaceAmt, expect = sum(qx) * FaceAmt) %>%
+    ungroup()%>%
+    group_by(client, kmonth)%>%
+    summarise(actual = sum(actual), expect = sum(expect)) %>%
+    mutate(ae = actual / expect)%>%
+    mutate(adverse = ae >1.1)
+```
+```{r}
+  summary(test2019$adverse)
+```
+
+delete the test data in case we don't have enough memory
+```{r}
+  test2019<-NULL
+```
+
+
+calculate the k-month ae value
+```{r}
+  k = 12
+  actual_ae <- experience %>%
+    left_join(person, by = c("client", "participant"))%>%
+    select(-industry, -Age, -collar, -Sex)%>%
+    #mutate(kmonth = (month-1) %/% k)%>%
+    group_by(client, participant,zip3,  month, year)%>%
+    summarise(actual = sum(death) * FaceAmt, expect = sum(qx) * FaceAmt) %>%
+    ungroup()%>%
+    group_by(client, zip3, year, month)%>%
+    #mutate(size = max(participant))%>%
+    summarise(actual = sum(actual), expect = sum(expect)) %>%
+    mutate(ae = actual / expect)%>%
+    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    adverse = factor(adverse))%>%
+    ungroup()%>%
+    group_by(client)
+```
+
+Since covid start spread in 2020, the more and more client's ae values are above the threshood 1.1.
+We need to bulid a new model to provide with better expected claim to manage the risk in the future pandemic situation.
+
+
+```{r}
+  summary(actual_ae$adverse[actual_ae$year==2019])
+  summary(actual_ae$adverse[actual_ae$year==2020])
+  summary(actual_ae$adverse[actual_ae$year==2021])
+```
+```{r}
+  summary(actual_ae$ae[actual_ae$year==2019])
+  summary(actual_ae$ae[actual_ae$year==2020])
+  summary(actual_ae$ae[actual_ae$year==2021])
+```
+```{r}
+  actual_ae%>%
+    ggplot(aes( x = adverse, fill = year/10000))+
+    geom_bar()
+```
+
+
+```{r}
+  unique(person$client)#list the clients
+  length(unique(person$client))# number of the clients
+  glimpse(actual_ae)
+  unique(actual_ae$adverse)
+  length(unique(actual_ae$adverse))
+```
+
+Build model:
+
+
+Prepare data:
+    -read other data and select the variable we think it is useful 
+```{r}
+otherdata <- read_feather("data.feather")%>%
+  select(-Unemployment_rate_2019,-'Deaths involving COVID-19', -'Deaths from All Causes',
+         -HU,-AREA)
+  
+```
+    -merge data
+```{r}
+try1 <-merge(actual_ae, otherdata, by = "zip3")%>%
+    mutate(zip3 = factor(zip3)) %>%
+    mutate(density = POP / AREALAND, AREALAND = NULL)%>%
+    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    adverse = factor(adverse))
+```
+
+```{r}
+try1 %>% 
+  count(adverse) %>% 
+  mutate(prop = n/sum(n))
+```
+```{r}
+  library(tidymodels)  
+  library(readr)       # for importing data
+  library(vip)    
+```
+
+Split data
+```{r}
+set.seed(123)
+splits <- initial_split(try1, strata = adverse)
+try_other <- training(splits)
+try_test  <- testing(splits)
+```
+
+```{r}
+set.seed(234)
+val_set <- validation_split(try_other, 
+                            strata = adverse, 
+                            prop = 0.70)
+val_set
+```
+
+BUILD THE MODEL
+
+#logistic regression model
+```{r}
+lr_mod <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+```
+Create recip
+```{r}
+lr_recipe <- 
+  recipe(adverse ~ ., data = try_other) %>%
+  update_role(client, zip3, new_role = "ID")%>%
+  update_role( actual, new_role = "future")
+  #remove_role(actual_ae, old_role = "predictor")
+```
+
+Creat workflow
+```{r}
+lr_workflow <- 
+  workflow() %>% 
+  add_model(lr_mod) %>% 
+  add_recipe(lr_recipe)
+```
+Create the grid for tuning 
+```{r}
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
+
+lr_reg_grid %>% top_n(-5)
+```
+Train and tune the model
+```{r}
+lr_res <- 
+  lr_workflow %>% 
+  tune_grid(val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(roc_auc))
+```
+
+```{r}
+tidy()
+```
+
+```{r}
+lr_plot <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + 
+  geom_point() + 
+  geom_line() + 
+  ylab("Area under the ROC Curve") +
+  scale_x_log10(labels = scales::label_number())
+
+lr_plot 
+```
+
+```{r}
+top_models <-
+  lr_res %>% 
+  show_best("roc_auc", n = 50) %>% 
+  arrange(penalty) 
+top_models
+```
+
+```{r}
+lr_best <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(40)
+```
+
+```{r}
+lr_auc <- 
+  lr_res %>% 
+  collect_predictions(parameters = lr_best) %>%
+  roc_curve(adverse, .pred_0) %>% 
+  mutate(model = "Logistic Regression")
+
+autoplot(lr_auc)
+```
+
+```{r}
+lr_res %>% 
+  collect_predictions(parameters = lr_best) 
+```
+
+
+
+
+#penalized logistic regression model
+```{r}
+lr_mod <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+```
+Create recip
+```{r}
+lr_recipe <- 
+  recipe(adverse ~ ., data = try_other) %>%
+  update_role(client, zip3, new_role = "ID")%>%
+  update_role( actual, new_role = "future")
+  #remove_role(actual_ae, old_role = "predictor")
+```
+
+Creat workflow
+```{r}
+lr_workflow <- 
+  workflow() %>% 
+  add_model(lr_mod) %>% 
+  add_recipe(lr_recipe)
+```
+Create the grid for tuning 
+```{r}
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
+
+lr_reg_grid %>% top_n(-5)
+```
+Train and tune the model
+```{r}
+lr_res <- 
+  lr_workflow %>% 
+  tune_grid(val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(roc_auc))
+```
+
+```{r}
+tidy()
+```
+
+```{r}
+lr_plot <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + 
+  geom_point() + 
+  geom_line() + 
+  ylab("Area under the ROC Curve") +
+  scale_x_log10(labels = scales::label_number())
+
+lr_plot 
+```
+
+```{r}
+top_models <-
+  lr_res %>% 
+  show_best("roc_auc", n = 50) %>% 
+  arrange(penalty) 
+top_models
+```
+
+```{r}
+lr_best <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(40)
+```
+
+```{r}
+lr_auc <- 
+  lr_res %>% 
+  collect_predictions(parameters = lr_best) %>%
+  roc_curve(adverse, .predictions_adverse) %>% 
+  mutate(model = "Logistic Regression")
+
+autoplot(lr_auc)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+I choose this one because there is detail example online.(not finished)
+
+-LightGBM: 
+```{r}
+library(data.table)
+library(Matrix)
+library(dplyr)
+library(MLmetrics)
+library(lightgbm)
+```
+
+-Split data
+     -Simple Splitting Based on the Outcome
+```{r}
+set.seed(3456)
+trainIndex <- createDataPartition(try1$adverse, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+```
+```{r}
+Train <- try1[ trainIndex,]
+Test <- try1[-trainIndex,]
+```
+Pre-processing
+```{r}
+median.impute = function(x){
+  x = as.data.frame(x)
+  for (i in 1:ncol(x)){
+    x[which(x[,i]== -1),i] = NA
+  }
+  
+  x = x %>% mutate_all(~ifelse(is.na(.), median(., na.rm = TRUE), .)) %>% as.data.table()
+  return(x)
+}
+
+Train = median.impute(Train)
+Test  = median.impute(Test)
+```
+Feature Engineering
+```{r}
+Test$ae = NA
+data = rbind(Train, Test)
+
+data[, fe_amount_NA := rowSums(data == -1, na.rm = T)]
+```
+
+Create LGB Dataset
+```{r}
+varnames = setdiff(colnames(data), c("client", "ae"))
+train_sparse = Matrix(as.matrix(data[!is.na(ae), varnames, with=F]), sparse=TRUE)
+test_sparse  = Matrix(as.matrix(data[is.na(ae) , varnames, with=F]), sparse=TRUE)
+
+y_train  = data[!is.na(ae),ae]
+test_ids = data[is.na(ae) ,client]
+
+lgb.train = lgb.Dataset(data=train_sparse, label=y_train)
+
+categoricals.vec = colnames(train)[c(grep("cat",colnames(train)))]
+```
+
+Setting up LGBM Parameters
+```{r}
+
+lgb.grid = list(objective = "binary",
+                metric = "auc",
+                min_sum_hessian_in_leaf = 1,
+                feature_fraction = 0.7,
+                bagging_fraction = 0.7,
+                bagging_freq = 5,
+                min_data = 100,
+                max_bin = 50,
+                lambda_l1 = 8,
+                lambda_l2 = 1.3,
+                min_data_in_bin=100,
+                min_gain_to_split = 10,
+                min_data_in_leaf = 30,
+                is_unbalance = TRUE)
+```
+
+Setting up Gini Eval Function
+```{r}
+# Gini for Lgb
+lgb.normalizedgini = function(preds, dtrain){
+  actual = getinfo(dtrain, "label")
+  score  = NormalizedGini(preds,actual)
+  return(list(name = "gini", value = score, higher_better = TRUE))
+}
+```
+Train Final Model
+```{r}
+best.iter = 525
+# Train final model
+lgb.model = lgb.train(params = lgb.grid, data = lgb.train, learning_rate = 0.02,
+                      num_leaves = 25, num_threads = 2 , nrounds = best.iter,
+                      eval_freq = 20, eval = lgb.normalizedgini,
+                      categorical_feature = categoricals.vec)
+```
+
+```{r}
+preds = data.table(id=test_ids, target=predict(lgb.model,test_sparse))
+colnames(preds)[1] = "id"
+fwrite(preds, "submission.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
