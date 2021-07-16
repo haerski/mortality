@@ -1,0 +1,57 @@
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(lattice)
+library(caret)
+library(feather)
+```
+
+```{r}
+  experience <- readRDS('experience_weekly_1.RDS')
+  person <-readRDS('person_1.RDS') 
+```
+
+```{r}
+ data <- read_feather('data.feather')
+ death <-read_feather('deaths_zip3.feather')
+```
+
+```{r}
+ traindata<- experience%>%
+  filter(year == 2020, month==c(1,2,3))
+```
+```{r}
+ test <- experience %>%
+  
+```
+
+```{r}
+AE <- experience %>%
+  group_by(client, participant, year, month)%>%
+  summarise(actual = sum(death)*person[]$FaceAmt)
+```
+```{r}
+test <- merge(traindata, person, by = c("client", "participant"))
+```
+```{r}
+AE <- test %>%
+  group_by(client,participant, year, month) %>%
+  summarise(Actual = sum(death)* FaceAmt, Expect = sum(qx)*FaceAmt)%>%
+  ungroup()%>%
+  group_by(client, year, month)%>%
+  summarise(Actual = sum(Actual), Expect = sum(Expect))%>%
+  mutate(AE= Actual/Expect)
+```
+```{r}
+
+```
+
+```{r}
+library(splines)
+library(VGAM)
+```
+
+
+
+
+
