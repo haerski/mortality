@@ -47,13 +47,3 @@ tags
 
 # for mac users
 .DS_Store
-
-# data files
-*.csv
-*.xls
-*.xlsx
-*.feather
-*.asc
-*.txt
-*.RDS
-*.rds
