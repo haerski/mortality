@@ -2,11 +2,14 @@
   library(tidyverse)
   library(feather)
   library(caret)
+  library(ggplot2)
 ```
 
 Read simulate data
 ```{r}
   experience <- readRDS("simulation_data/experience_weekly_1.RDS")
+  experience$death[experience$death==2] <- 1
+  
   person <-readRDS("simulation_data/person_1.RDS")
 ```
 
@@ -14,7 +17,7 @@ Read simulate data
 k-month ae value for 2019. for any k, around 10% client's ae is over the threshold 1.1.
 Here we choose k = 1 for the following work.
 ```{r}
-  k = 1
+  k = 12
   test2019 <- experience %>%
     filter(year == 2019)%>%
     left_join(person, by = c("client", "participant"))%>%
@@ -40,7 +43,7 @@ delete the test data in case we don't have enough memory
 
 calculate the k-month ae value
 ```{r}
-  k = 1
+  k = 12
   actual_ae <- experience %>%
     left_join(person, by = c("client", "participant"))%>%
     select(-industry, -Age, -collar, -Sex)%>%
@@ -49,36 +52,289 @@ calculate the k-month ae value
     summarise(actual = sum(death) * FaceAmt, expect = sum(qx) * FaceAmt) %>%
     ungroup()%>%
     group_by(client, zip3, year, month)%>%
+    #mutate(size = max(participant))%>%
     summarise(actual = sum(actual), expect = sum(expect)) %>%
     mutate(ae = actual / expect)%>%
-    mutate(adverse = ae >1.1)
+    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    adverse = factor(adverse))%>%
+    ungroup()%>%
+    group_by(client)
 ```
 
-Since covid start spread in 2020, the more and more client's ae values are above the threshod 1.1.
+Since covid start spread in 2020, the more and more client's ae values are above the threshood 1.1.
 We need to bulid a new model to provide with better expected claim to manage the risk in the future pandemic situation.
+
 
 ```{r}
   summary(actual_ae$adverse[actual_ae$year==2019])
   summary(actual_ae$adverse[actual_ae$year==2020])
   summary(actual_ae$adverse[actual_ae$year==2021])
 ```
+```{r}
+  summary(actual_ae$ae[actual_ae$year==2019])
+  summary(actual_ae$ae[actual_ae$year==2020])
+  summary(actual_ae$ae[actual_ae$year==2021])
+```
+```{r}
+  actual_ae%>%
+    ggplot(aes( x = adverse, fill = year/10000))+
+    geom_bar()
+```
 
 
 ```{r}
   unique(person$client)#list the clients
   length(unique(person$client))# number of the clients
+  glimpse(actual_ae)
+  unique(actual_ae$adverse)
+  length(unique(actual_ae$adverse))
 ```
 
 Build model:
 
-Here we choose the first three month data as the train data (2020.1-2020.3)
+
+Prepare data:
+    -read other data and select the variable we think it is useful 
 ```{r}
-try1 <- actual_ae%>%
-    filter(year == 2020, month == c(1,2,3))
+otherdata <- read_feather("data.feather")%>%
+  select(-Unemployment_rate_2019,-'Deaths involving COVID-19', -'Deaths from All Causes',
+         -HU,-AREA)
+  
+```
+    -merge data
+```{r}
+try1 <-merge(actual_ae, otherdata, by = "zip3")%>%
+    mutate(zip3 = factor(zip3)) %>%
+    mutate(density = POP / AREALAND, AREALAND = NULL)%>%
+    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    adverse = factor(adverse))
 ```
 
-I choose this one because there is detail example online.
-L
+```{r}
+try1 %>% 
+  count(adverse) %>% 
+  mutate(prop = n/sum(n))
+```
+```{r}
+  library(tidymodels)  
+  library(readr)       # for importing data
+  library(vip)    
+```
+
+Split data
+```{r}
+set.seed(123)
+splits <- initial_split(try1, strata = adverse)
+try_other <- training(splits)
+try_test  <- testing(splits)
+```
+
+```{r}
+set.seed(234)
+val_set <- validation_split(try_other, 
+                            strata = adverse, 
+                            prop = 0.70)
+val_set
+```
+
+BUILD THE MODEL
+
+#logistic regression model
+```{r}
+lr_mod <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+```
+Create recip
+```{r}
+lr_recipe <- 
+  recipe(adverse ~ ., data = try_other) %>%
+  update_role(client, zip3, new_role = "ID")%>%
+  update_role( actual, new_role = "future")
+  #remove_role(actual_ae, old_role = "predictor")
+```
+
+Creat workflow
+```{r}
+lr_workflow <- 
+  workflow() %>% 
+  add_model(lr_mod) %>% 
+  add_recipe(lr_recipe)
+```
+Create the grid for tuning 
+```{r}
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
+
+lr_reg_grid %>% top_n(-5)
+```
+Train and tune the model
+```{r}
+lr_res <- 
+  lr_workflow %>% 
+  tune_grid(val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(roc_auc))
+```
+
+```{r}
+tidy()
+```
+
+```{r}
+lr_plot <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + 
+  geom_point() + 
+  geom_line() + 
+  ylab("Area under the ROC Curve") +
+  scale_x_log10(labels = scales::label_number())
+
+lr_plot 
+```
+
+```{r}
+top_models <-
+  lr_res %>% 
+  show_best("roc_auc", n = 50) %>% 
+  arrange(penalty) 
+top_models
+```
+
+```{r}
+lr_best <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(40)
+```
+
+```{r}
+lr_auc <- 
+  lr_res %>% 
+  collect_predictions(parameters = lr_best) %>%
+  roc_curve(adverse, .pred_0) %>% 
+  mutate(model = "Logistic Regression")
+
+autoplot(lr_auc)
+```
+
+```{r}
+lr_res %>% 
+  collect_predictions(parameters = lr_best) 
+```
+
+
+
+
+#penalized logistic regression model
+```{r}
+lr_mod <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+```
+Create recip
+```{r}
+lr_recipe <- 
+  recipe(adverse ~ ., data = try_other) %>%
+  update_role(client, zip3, new_role = "ID")%>%
+  update_role( actual, new_role = "future")
+  #remove_role(actual_ae, old_role = "predictor")
+```
+
+Creat workflow
+```{r}
+lr_workflow <- 
+  workflow() %>% 
+  add_model(lr_mod) %>% 
+  add_recipe(lr_recipe)
+```
+Create the grid for tuning 
+```{r}
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
+
+lr_reg_grid %>% top_n(-5)
+```
+Train and tune the model
+```{r}
+lr_res <- 
+  lr_workflow %>% 
+  tune_grid(val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(roc_auc))
+```
+
+```{r}
+tidy()
+```
+
+```{r}
+lr_plot <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + 
+  geom_point() + 
+  geom_line() + 
+  ylab("Area under the ROC Curve") +
+  scale_x_log10(labels = scales::label_number())
+
+lr_plot 
+```
+
+```{r}
+top_models <-
+  lr_res %>% 
+  show_best("roc_auc", n = 50) %>% 
+  arrange(penalty) 
+top_models
+```
+
+```{r}
+lr_best <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(40)
+```
+
+```{r}
+lr_auc <- 
+  lr_res %>% 
+  collect_predictions(parameters = lr_best) %>%
+  roc_curve(adverse, .predictions_adverse) %>% 
+  mutate(model = "Logistic Regression")
+
+autoplot(lr_auc)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+I choose this one because there is detail example online.(not finished)
+
 -LightGBM: 
 ```{r}
 library(data.table)
