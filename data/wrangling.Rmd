@@ -145,7 +145,8 @@ election<-election%>%
   summarise(candidatevotes=sum(candidatevotes),totalvotes= totalvotes)%>%
   distinct()%>%
   pivot_wider(names_from = party,values_from =candidatevotes)%>%
-  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes)
+  summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes) %>%
+  mutate(FIPS = str_pad(as.character(FIPS), 5, pad = "0"))
 ```
 
 Combine together, education has the most counties. There will be lots of NANs!!
@@ -184,7 +185,7 @@ modifydata <- cleandata %>%
   relocate(Median_Household_Income_2019, .before = zip3) %>%
   mutate(Population = NULL) %>%
   summarize(
-            across(`less than high school`:`Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`, ~ sum(.x * POPPT / sum(POPPT, na.rm = TRUE), na.rm = TRUE)),
+            across(`less than high school`:`Percent adults fully vaccinated against COVID-19 (as of 6/10/21).y`, ~ sum(.x * POPPT / sum(POPPT, na.rm = TRUE), na.rm = TRUE)),
             Median_Household_Income_2019 = sum(Median_Household_Income_2019 * HUPT / sum(HUPT, na.rm = TRUE), na.rm = TRUE),
             POP = sum(POPPT),
             HU = sum(HUPT),
