@@ -2,9 +2,9 @@ library(tidyverse)
 library(tidymodels)
 library(feather)
 
-exp <- read_rds("simulation_data/experience_weekly_1.RDS")
-per <- read_rds("simulation_data/person_1.RDS")
-qx_table <- read_csv("soa_base_2017.csv")
+exp <- read_rds("data/simulation_data/experience_weekly_1.RDS")
+per <- read_rds("data/simulation_data/person_1.RDS")
+qx_table <- read_csv("data/soa_base_2017.csv")
 
 dies <-
   exp %>%
@@ -17,7 +17,9 @@ aug_per <-
   left_join(qx_table, by = c("Age", "Sex", "collar"))
 
 
-write_feather(aug_per, "simulation_data/per_1.feather")
+write_feather(aug_per, "data/simulation_data/per_1.feather")
+
+aug_per <- read_feather("data/simulation_data/per_1.feather")
 
 per <- aug_per
 per
@@ -30,6 +32,7 @@ exp <-
   summarize(expected = sum(qx * FaceAmt), zip3 = first(zip3))
 
 # This is how much we payed for each client in 2019
+# This is terrible code, please fix
 act_2019 <-
   per %>%
   filter(year == 2019) %>%
@@ -46,6 +49,7 @@ act_2021 <-
   group_by(client) %>%
   summarize(actual2021 = sum(FaceAmt))
 
+# This is also terrible...
 exp <-
   exp %>%
   left_join(act_2019) %>%
@@ -61,7 +65,7 @@ exp <-
 exp
 
 other_data <-
-  read_feather("data.feather") %>%
+  read_feather("data/data.feather") %>%
   select(zip3, POP, AREALAND, `Deaths involving COVID-19`, per_dem, `Social Vulnerability Index (SVI)`, `CVAC level of concern for vaccination rollout`) %>%
   rename(covid_deaths = `Deaths involving COVID-19`, svi = `Social Vulnerability Index (SVI)`, cvac = `CVAC level of concern for vaccination rollout`) %>%
   mutate(density = POP / AREALAND, AREALAND = NULL)
