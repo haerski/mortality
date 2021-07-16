@@ -1,0 +1,122 @@
+### Random forest
+
+## A first attempt!
+
+Load some libraries and necessary data files
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(feather)
+library(magrittr)
+library(skimr)
+per <- read_feather("data/simulation_data/all_persons.feather")
+```
+
+Compute some summary statistic for each client.
+```{r}
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "Blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+  )
+```
+
+We can add some demographic information based on zip3.
+```{r}
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    `Percent adults fully vaccinated against COVID-19 (as of 6/10/21)` = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    Unemployment_rate_2020 = NULL,
+    PCTPOVALL_2019 = NULL,
+    `Deaths involving COVID-19` = NULL,
+    `Deaths from All Causes` = NULL
+  ) %>%
+  rename(
+    nohs = `less than high school`,
+    hs = `high school`,
+    unemp = Unemployment_rate_2019,
+    hes = `Estimated hesitant`,
+    hes_uns = `Estimated hesitant or unsure`,
+    str_hes = `Estimated strongly hesitant`,
+    svi = `Social Vulnerability Index (SVI)`,
+    cvac = `CVAC level of concern for vaccination rollout`,
+    income = Median_Household_Income_2019
+  )
+```
+There seems to be some clients with some zip codes that we cannot deal with. These are the ones
+```{r}
+clients %>%
+  anti_join(zip_data, by = "zip3") %>%
+  select(zip3)
+```
+These correspond to the following areas
+
+ZIP3 | Area       |
+-----|------------|
+969  | Guam, Palau, Federated States of Micronesia, Northern Mariana Islands, Marshall Islands |
+093  | Military bases in Iraq and Afghanistan |
+732  | Not in use |
+872  | Not in use |
+004  | Not in use |
+
+We ignore clients with these zip codes.
+```{r}
+clients %<>%
+  inner_join(zip_data, by = "zip3")
+```
+
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+
+## Modelling
+We will use a random forest using the tidymodels framework.
+
+We start by refining a recipe. We won't use zip3, client ID and actual claims as predictors, and we'll create a factor based on the value of `ae_2020`. We cut at value 1.1 (this could be tuned later!!!).
+```{r}
+ranger_recipe <-
+  recipe(ae_2020 ~ ., data = clients) %>%
+  update_role(zip3, client, new_role = "company ID") %>%
+  step_cut(ae_2020, breaks = 1.1, include_outside_range = TRUE)
+```
+
+
+```{r eval=FALSE}
+ranger_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger")
+
+ranger_workflow <-
+  workflow() %>%
+  add_recipe(ranger_recipe) %>%
+  add_model(ranger_spec)
+
+set.seed(22361)
+# ranger_tune <-
+#   tune_grid(
+#     ranger_workflow,
+#     resamples = stop("add your rsample object"),
+#     grid = stop("add number of candidate points"))
+```
+
