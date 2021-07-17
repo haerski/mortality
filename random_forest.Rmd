@@ -1,3 +1,10 @@
+---
+title: Random forests
+author: Marc Härkönen
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
 # Random forests
 
 ## Data business
@@ -103,7 +110,7 @@ ranger_recipe <-
 ```
 
 We use the ranger engine for our random forest. We could tune the paramters as well
-```{r eval=FALSE}
+```{r}
 ranger_spec <-
   rand_forest(trees = 1000) %>%
   set_mode("classification") %>%
@@ -234,7 +241,7 @@ ranger_last_fit %>%
 Better!
 
 Can we tune hyperparameters to get even better results? Let's check
-```{r}
+```{r message = FALSE, warning = FALSE}
 tune_spec <-
   ranger_spec %>%
   update(mtry = tune(), min_n = tune())
