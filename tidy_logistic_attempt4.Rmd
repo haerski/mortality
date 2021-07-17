@@ -55,7 +55,7 @@ exp
 
 other_data <-
   read_feather("data.feather") %>%
-  select(zip3, POP, AREALAND, `Deaths involving COVID-19`, per_dem, `Social Vulnerability Index (SVI)`, `CVAC level of concern for vaccination rollout`) %>%
+  select(zip3, POP, AREALAND, `Deaths involving COVID-19`, per_dem, `Social Vulnerability Index (SVI)`, `CVAC level of concern for vaccination rollout`, `less than high school`, `Unemployment_rate_2019`, `PCTPOVALL_2019`  ) %>%
   rename(covid_deaths = `Deaths involving COVID-19`, svi = `Social Vulnerability Index (SVI)`, cvac = `CVAC level of concern for vaccination rollout`) %>%
   mutate(density = POP / AREALAND, AREALAND = NULL)
 
@@ -91,11 +91,13 @@ lr_mod <-
   logistic_reg(penalty = tune(), mixture = 1) %>% 
   set_engine("glmnet")
 
-client_rec <-
+client_rec_lr <-
   recipe(Y ~ ., data = data_train) %>%
   update_role(client, new_role = "client ID") %>%
   update_role(actual2020, actual2021, AE2020, AE2021, new_role = "future") %>%
   step_rm(zip3) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_zv(all_predictors()) %>% 
   step_normalize(all_predictors())
 
 summary(client_rec)
