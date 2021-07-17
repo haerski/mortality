@@ -1,10 +1,3 @@
----
-title: Random forests
-author: Marc Härkönen
-output:
-  pdf_document:
-    latex_engine: xelatex
----
 # Random forests
 
 ## Data business
@@ -17,7 +10,9 @@ library(tidymodels)
 library(feather)
 library(magrittr)
 library(skimr)
+library(vip)
 per <- read_feather("data/simulation_data/all_persons.feather")
+set.seed(123)
 ```
 
 Compute some summary statistic for each client.
@@ -33,7 +28,7 @@ clients <-
     avg_qx = mean(qx),
     avg_age = mean(Age),
     per_male = sum(Sex == "Male") / size,
-    per_blue_collar = sum(collar == "Blue") / size,
+    per_blue_collar = sum(collar == "blue") / size,
     expected = sum(qx * FaceAmt),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
@@ -157,7 +152,7 @@ Table: Data summary
 |avg_qx          |         0|             1|         0.00|         0.00|       0.00|         0.00|         0.00|         0.00| 0.000000e+00|▁▇▇▂▁ |
 |avg_age         |         0|             1|        41.56|         2.05|      37.68|        40.11|        41.11|        42.49| 4.865000e+01|▃▇▃▁▁ |
 |per_male        |         0|             1|         0.57|         0.10|       0.22|         0.50|         0.57|         0.64| 8.900000e-01|▁▃▇▅▁ |
-|per_blue_collar |         0|             1|         0.00|         0.00|       0.00|         0.00|         0.00|         0.00| 0.000000e+00|▁▁▇▁▁ |
+|per_blue_collar |         0|             1|         1.00|         0.00|       1.00|         1.00|         1.00|         1.00| 1.000000e+00|▁▁▇▁▁ |
 |expected        |         0|             1|   1075634.02|   1054075.28|   11604.50|    353219.92|    832197.99|   1436637.06| 1.189955e+07|▇▁▁▁▁ |
 |actual_2020     |         0|             1|  15378942.63|  44643400.61|       0.00|   1962875.00|   4556125.00|  13950250.00| 5.232112e+08|▇▁▁▁▁ |
 |nohs            |         0|             1|        11.16|         3.78|       0.00|         8.44|        10.78|        12.88| 2.165000e+01|▁▅▇▂▂ |
@@ -195,7 +190,7 @@ We use the ranger engine for our random forest. We could tune the paramters as w
 ranger_spec <-
   rand_forest(trees = 1000) %>%
   set_mode("classification") %>%
-  set_engine("ranger")
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
 ```
 
 Wrap the recipe and model into a workflow
@@ -222,8 +217,8 @@ clients_test %>% count(adverse)
 ## # A tibble: 2 x 2
 ##   adverse     n
 ##   <fct>   <int>
-## 1 FALSE      21
-## 2 TRUE      103
+## 1 FALSE      14
+## 2 TRUE      110
 ```
 
 ```r
@@ -235,8 +230,8 @@ clients_train %>% count(adverse)
 ## # A tibble: 2 x 2
 ##   adverse     n
 ##   <fct>   <int>
-## 1 FALSE      25
-## 2 TRUE      346
+## 1 FALSE      32
+## 2 TRUE      339
 ```
 
 Train the workflow
@@ -266,9 +261,10 @@ predictions %>%
 ```
 ##           Truth
 ## Prediction FALSE TRUE
-##      FALSE     0    1
-##      TRUE     21  102
+##      FALSE     1    0
+##      TRUE     13  110
 ```
+
 It looks like the the model performs well, but it's basically predicting that all companies will have adverse deaths.
 
 This is another way to automate computation of metrics
@@ -288,10 +284,10 @@ ranger_last_fit %>% collect_metrics()
 ## # A tibble: 4 x 4
 ##   .metric .estimator .estimate .config             
 ##   <chr>   <chr>          <dbl> <chr>               
-## 1 sens    binary       0       Preprocessor1_Model1
-## 2 spec    binary       0.990   Preprocessor1_Model1
-## 3 j_index binary      -0.00971 Preprocessor1_Model1
-## 4 roc_auc binary       0.844   Preprocessor1_Model1
+## 1 sens    binary        0.0714 Preprocessor1_Model1
+## 2 spec    binary        1      Preprocessor1_Model1
+## 3 j_index binary        0.0714 Preprocessor1_Model1
+## 4 roc_auc binary        0.910  Preprocessor1_Model1
 ```
 
 ```r
@@ -331,10 +327,10 @@ subsample_last_fit %>% collect_metrics()
 ## # A tibble: 4 x 4
 ##   .metric .estimator .estimate .config             
 ##   <chr>   <chr>          <dbl> <chr>               
-## 1 sens    binary         0.333 Preprocessor1_Model1
-## 2 spec    binary         0.874 Preprocessor1_Model1
-## 3 j_index binary         0.207 Preprocessor1_Model1
-## 4 roc_auc binary         0.713 Preprocessor1_Model1
+## 1 sens    binary         0.429 Preprocessor1_Model1
+## 2 spec    binary         0.709 Preprocessor1_Model1
+## 3 j_index binary         0.138 Preprocessor1_Model1
+## 4 roc_auc binary         0.619 Preprocessor1_Model1
 ```
 
 ```r
@@ -360,6 +356,7 @@ clients$ae_2020 %>% summary()
 ##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
 ##   0.000   2.976   6.460  15.036  14.034 232.897
 ```
+
 Let's say that a client experiences adverse deaths if AE > 3, which is about the 1st quartile
 
 ```r
@@ -388,10 +385,10 @@ ranger_last_fit %>% collect_metrics()
 ## # A tibble: 4 x 4
 ##   .metric .estimator .estimate .config             
 ##   <chr>   <chr>          <dbl> <chr>               
-## 1 sens    binary         0.606 Preprocessor1_Model1
-## 2 spec    binary         0.912 Preprocessor1_Model1
-## 3 j_index binary         0.518 Preprocessor1_Model1
-## 4 roc_auc binary         0.806 Preprocessor1_Model1
+## 1 sens    binary         0.536 Preprocessor1_Model1
+## 2 spec    binary         0.938 Preprocessor1_Model1
+## 3 j_index binary         0.473 Preprocessor1_Model1
+## 4 roc_auc binary         0.872 Preprocessor1_Model1
 ```
 
 ```r
@@ -402,6 +399,7 @@ ranger_last_fit %>%
 ```
 
 ![plot of chunk unnamed-chunk-18](figure/unnamed-chunk-18-1.png)
+
 Better!
 
 Can we tune hyperparameters to get even better results? Let's check
@@ -420,17 +418,16 @@ tune_resamples <-
   vfold_cv(training(tune_split))
 
 param_grid <-
-  tune_workflow %>%
-  parameters() %>%
-  finalize(training(tune_split)) %>%
-  grid_regular(levels = 5)
+  grid_regular(mtry(c(1,23)),
+               min_n(),
+               levels = 5)
 
 tune_res <-
   tune_workflow %>%
   tune_grid(
     resamples = tune_resamples,
     grid = param_grid,
-    metrics = metric_set(sens, spec, roc_auc, j_index)
+    metrics = metric_set(sens, spec, roc_auc, j_index, accuracy)
   )
 
 autoplot(tune_res)
@@ -438,10 +435,10 @@ autoplot(tune_res)
 
 ![plot of chunk unnamed-chunk-19](figure/unnamed-chunk-19-1.png)
 
-For me, the best is mtry = 14, min_n = 11.
+I chose mtry = 17, min_n = 2.
 
 ```r
-best <- tibble(mtry = 14, min_n = 11)
+best <- tibble(mtry = 17, min_n = 2)
 final_wf <-
   tune_workflow %>%
   finalize_workflow(best)
@@ -450,7 +447,7 @@ final_wf_fit <-
   final_wf %>%
   last_fit(
     tune_split,
-    metrics = metric_set(sens, spec, roc_auc, j_index)
+    metrics = metric_set(sens, spec, roc_auc, j_index, accuracy)
     )
 
 final_wf_fit %>%
@@ -458,12 +455,36 @@ final_wf_fit %>%
 ```
 
 ```
-## # A tibble: 4 x 4
-##   .metric .estimator .estimate .config             
-##   <chr>   <chr>          <dbl> <chr>               
-## 1 sens    binary         0.618 Preprocessor1_Model1
-## 2 spec    binary         0.956 Preprocessor1_Model1
-## 3 j_index binary         0.573 Preprocessor1_Model1
-## 4 roc_auc binary         0.888 Preprocessor1_Model1
+## # A tibble: 5 x 4
+##   .metric  .estimator .estimate .config             
+##   <chr>    <chr>          <dbl> <chr>               
+## 1 sens     binary         0.529 Preprocessor1_Model1
+## 2 spec     binary         0.978 Preprocessor1_Model1
+## 3 j_index  binary         0.507 Preprocessor1_Model1
+## 4 accuracy binary         0.855 Preprocessor1_Model1
+## 5 roc_auc  binary         0.845 Preprocessor1_Model1
 ```
+
+```r
+final_wf_fit %>%
+  collect_predictions() %>%
+  roc_curve(adverse, .pred_FALSE) %>%
+  autoplot()
+```
+
+![plot of chunk unnamed-chunk-20](figure/unnamed-chunk-20-1.png)
+
 Cool stuff. How does this compare to logistic regression by month???
+
+We can also check variable importance
+
+```r
+final_wf_fit %>%
+  pluck(".workflow", 1) %>%
+  pull_workflow_fit() %>%
+  vip(num_features = 30)
+```
+
+![plot of chunk unnamed-chunk-21](figure/unnamed-chunk-21-1.png)
+
+Looks like population is the overwhelming winner. Next unemployment percentage, non-highschool graduate percentage and population density.
