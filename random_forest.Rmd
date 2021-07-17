@@ -92,26 +92,89 @@ skim(clients)
 ## Modelling
 We will use a random forest using the tidymodels framework.
 
-We start by refining a recipe. We won't use zip3, client ID and actual claims as predictors, and we'll create a factor based on the value of `ae_2020`. We cut at value 1.1 (this could be tuned later!!!).
+We start by creating a recipe. We won't use zip3, client ID and actual claims as predictors, and we'll create a factor based on the value of `ae_2020`. We cut at value 1.1 (this could be tuned later!!!).
+We use skip = TRUE, as we don't assume that `ae_2020` is available in prediction set.
 ```{r}
 ranger_recipe <-
   recipe(ae_2020 ~ ., data = clients) %>%
   update_role(zip3, client, new_role = "company ID") %>%
-  step_cut(ae_2020, breaks = 1.1, include_outside_range = TRUE)
+  step_rm(actual_2020) %>%
+  step_cut(ae_2020, breaks = 1.1, include_outside_range = TRUE, skip = TRUE)
 ```
 
-
+We use the ranger engine for our random forest. We could tune the paramters as well
 ```{r eval=FALSE}
 ranger_spec <-
-  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  rand_forest(trees = 1000) %>%
   set_mode("classification") %>%
   set_engine("ranger")
+```
 
+Wrap the recipe and model into a workflow
+```{r}
 ranger_workflow <-
   workflow() %>%
   add_recipe(ranger_recipe) %>%
   add_model(ranger_spec)
+```
 
+Create an initial test-train split
+```{r}
+init_split <-
+  clients %>%
+  initial_split()
+
+clients_test <- testing(init_split)
+clients_train <- training(init_split)
+```
+
+Train the workflow
+```{r}
+ranger_trained <-
+  ranger_workflow %>%
+  fit(clients_train)
+```
+
+And we predict
+```{r}
+predictions <-
+  ranger_trained %>%
+  predict(clients_test)
+```
+
+Compute the confusion matrix
+```{r}
+truth <-
+  ranger_recipe %>%
+  prep(clients_test) %>%
+  bake(new_data = NULL) %>%
+  select(ae_2020, zip3)
+
+predictions %>%
+  bind_cols(truth) %>%
+  conf_mat(ae_2020, .pred_class)
+```
+It looks like the the model performs well, but it's basically predicting that all companies will have adverse deaths.
+
+## Subsampling
+We will make train the model for more adverse outcomes by using *subsampling*. See e.g. [here](https://www.tidymodels.org/learn/models/sub-sampling/) for a nice introduction.
+```{r}
+library(themis)
+subsample_recipe <-
+  ranger_recipe %>%
+  step_rose(ae_2020)
+subsample_workflow <-
+  ranger_workflow %>%
+  update_recipe(subsample_recipe)
+val_split <-
+  
+```
+
+
+
+
+
+```{r}
 set.seed(22361)
 # ranger_tune <-
 #   tune_grid(
