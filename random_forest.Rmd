@@ -28,7 +28,9 @@ clients <-
     expected = sum(qx * FaceAmt),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
-  )
+    adverse = as.factor(ae_2020 > 1.1)
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3)
 ```
 
 We can add some demographic information based on zip3.
@@ -92,14 +94,12 @@ skim(clients)
 ## Modelling
 We will use a random forest using the tidymodels framework.
 
-We start by creating a recipe. We won't use zip3, client ID and actual claims as predictors, and we'll create a factor based on the value of `ae_2020`. We cut at value 1.1 (this could be tuned later!!!).
-We use skip = TRUE, as we don't assume that `ae_2020` is available in prediction set.
+We start by creating a recipe. We won't use zip3, client ID, actual claims, or ae_2020 as predictors.
 ```{r}
 ranger_recipe <-
-  recipe(ae_2020 ~ ., data = clients) %>%
-  update_role(zip3, client, new_role = "company ID") %>%
-  step_rm(actual_2020) %>%
-  step_cut(ae_2020, breaks = 1.1, include_outside_range = TRUE, skip = TRUE)
+  recipe(adverse ~ ., data = clients) %>%
+  update_role(zip3, ae_2020, new_role = "diagnostic") %>%
+  step_rm(actual_2020, client)
 ```
 
 We use the ranger engine for our random forest. We could tune the paramters as well
@@ -122,7 +122,7 @@ Create an initial test-train split
 ```{r}
 init_split <-
   clients %>%
-  initial_split()
+  initial_split(strata = adverse)
 
 clients_test <- testing(init_split)
 clients_train <- training(init_split)
@@ -144,15 +144,9 @@ predictions <-
 
 Compute the confusion matrix
 ```{r}
-truth <-
-  ranger_recipe %>%
-  prep(clients_test) %>%
-  bake(new_data = NULL) %>%
-  select(ae_2020, zip3)
-
 predictions %>%
-  bind_cols(truth) %>%
-  conf_mat(ae_2020, .pred_class)
+  bind_cols(clients_test %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
 ```
 It looks like the the model performs well, but it's basically predicting that all companies will have adverse deaths.
 
@@ -162,12 +156,32 @@ We will make train the model for more adverse outcomes by using *subsampling*. S
 library(themis)
 subsample_recipe <-
   ranger_recipe %>%
-  step_rose(ae_2020)
+  step_rose(adverse)
 subsample_workflow <-
   ranger_workflow %>%
   update_recipe(subsample_recipe)
-val_split <-
+val_split <- vfold_cv(clients_train, strata = adverse)
+
+rose_fit <-
+  fit_resamples(
+    subsample_workflow,
+    val_split,
+    control = control_resamples(save_pred = TRUE))
   
+collect_metrics(rose_fit)
+collect_predictions(rose_fit) %>%
+  conf_mat(adverse, .pred_class)
+
+
+ranger_fit <-
+  fit_resamples(
+    ranger_workflow,
+    val_split,
+    control = control_resamples(save_pred = TRUE))
+  
+collect_metrics(ranger_fit)
+collect_predictions(ranger_fit) %>%
+  conf_mat(adverse, .pred_class)
 ```
 
 
