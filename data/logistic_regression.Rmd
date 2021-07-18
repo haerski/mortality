@@ -1,11 +1,35 @@
+
 ```{r}
   library(tidyverse)
   library(feather)
-  library(caret)
   library(ggplot2)
+  library(tidymodels)  
+  library(readr)       # for importing data
+  library(vip)
+  library(lubridate)
+```
+Currently we use the threshold = 1.1
+```{r}
+  thres = 1.1
 ```
 
-Read simulate data
+
+
+Read necessary other data(zip3)
+```{r}
+otherdata <- read_feather("data.feather")%>%
+  mutate(density = POP / AREALAND, AREALAND = NULL)%>%
+  select(-Unemployment_rate_2020,-'Deaths involving COVID-19', -'Deaths from All Causes',
+         -HU,-AREA)
+  
+deaths <- read_feather("deaths_zip3.feather")%>%
+    mutate(year = year(date), month = month(date), week = week(date))%>%
+    group_by(zip3, year, month)%>%
+    summarise(deaths = sum(deaths))%>%
+    ungroup()
+```
+
+Read simulate data(here i just use the first data set)
 ```{r}
   experience <- readRDS("simulation_data/experience_weekly_1.RDS")
   experience$death[experience$death==2] <- 1
@@ -14,10 +38,10 @@ Read simulate data
 ```
 
 
-k-month ae value for 2019. for any k, around 10% client's ae is over the threshold 1.1.
-Here we choose k = 1 for the following work.
+
+calculate k-monthly ae value for 2019. for any k, around 10% client's ae is over the threshold 1.1.
 ```{r}
-  k = 12
+  k = 1
   test2019 <- experience %>%
     filter(year == 2019)%>%
     left_join(person, by = c("client", "participant"))%>%
@@ -35,28 +59,36 @@ Here we choose k = 1 for the following work.
   summary(test2019$adverse)
 ```
 
-delete the test data in case we don't have enough memory
-```{r}
-  test2019<-NULL
-```
-
-
 calculate the k-month ae value
 ```{r}
-  k = 12
+  k = 1
   actual_ae <- experience %>%
     left_join(person, by = c("client", "participant"))%>%
-    select(-industry, -Age, -collar, -Sex)%>%
     #mutate(kmonth = (month-1) %/% k)%>%
     group_by(client, participant,zip3,  month, year)%>%
-    summarise(actual = sum(death) * FaceAmt, expect = sum(qx) * FaceAmt) %>%
+    summarise(actual = sum(death) * FaceAmt, 
+              expect = sum(qx) * FaceAmt, 
+              FaceAmt = FaceAmt,
+              qx = sum(qx),
+              sex = Sex,
+              age = Age, 
+              industry = industry,
+              collar = collar) %>%
     ungroup()%>%
     group_by(client, zip3, year, month)%>%
-    #mutate(size = max(participant))%>%
-    summarise(actual = sum(actual), expect = sum(expect)) %>%
+    summarise(actual = sum(actual), 
+              expect = sum(expect), 
+              size = n(),
+              volume = sum(FaceAmt),
+              avg_qx = mean(qx),
+              avg_age = mean(age),
+              per_male = sum(sex == "Male") / size,
+              per_blue_collar = sum(collar == "blue") / size,
+              ) %>%
     mutate(ae = actual / expect)%>%
     mutate(adverse = ifelse(ae > 1.1, 1, 0),
     adverse = factor(adverse))%>%
+    relocate(adverse, ae, .after = zip3)%>%
     ungroup()%>%
     group_by(client)
 ```
@@ -75,11 +107,7 @@ We need to bulid a new model to provide with better expected claim to manage the
   summary(actual_ae$ae[actual_ae$year==2020])
   summary(actual_ae$ae[actual_ae$year==2021])
 ```
-```{r}
-  actual_ae%>%
-    ggplot(aes( x = adverse, fill = year/10000))+
-    geom_bar()
-```
+
 
 
 ```{r}
@@ -92,50 +120,63 @@ We need to bulid a new model to provide with better expected claim to manage the
 
 Build model:
 
+#logisitic regression
 
-Prepare data:
-    -read other data and select the variable we think it is useful 
-```{r}
-otherdata <- read_feather("data.feather")%>%
-  select(-Unemployment_rate_2019,-'Deaths involving COVID-19', -'Deaths from All Causes',
-         -HU,-AREA)
-  
-```
+For logistic regression, we need a target(Y), in our problem, we only have first three month data druing pandemic.
+
+Here I use monthly ae as Y.
+
+
     -merge data
 ```{r}
-try1 <-merge(actual_ae, otherdata, by = "zip3")%>%
+all_data <- actual_ae %>%
+    inner_join(otherdata, by = "zip3")%>%
     mutate(zip3 = factor(zip3)) %>%
-    mutate(density = POP / AREALAND, AREALAND = NULL)%>%
     mutate(adverse = ifelse(ae > 1.1, 1, 0),
-    adverse = factor(adverse))
-```
-
-```{r}
-try1 %>% 
-  count(adverse) %>% 
-  mutate(prop = n/sum(n))
-```
-```{r}
-  library(tidymodels)  
-  library(readr)       # for importing data
-  library(vip)    
+    adverse = factor(adverse))%>%
+    left_join(deaths, by = c("zip3", "year", "month"))%>%
+    mutate(rate_deaths = deaths/POP, deaths = NULL) %>%
+    mutate(zip3 = factor(zip3))
 ```
 
 Split data
+
+We have the data for the first three month during pandemic
+
+We use first three month in 2020 data as train set,
+the rest month as test data.
+
 ```{r}
-set.seed(123)
-splits <- initial_split(try1, strata = adverse)
-try_other <- training(splits)
-try_test  <- testing(splits)
+train <- all_data %>%
+  filter(year == 2020, month == c(1,2,3,4))
+
+test <- all_data %>%
+  filter(year ==2020, month= !c(1,2,3,4))
+
+test2 <- all_data %>%
+  filter(year ==2021)
+
+set.seed(234)
+val_set <- validation_split(test, 
+                            strata = adverse, 
+                            prop = 0.70)
+  
+val_set
 ```
 
 ```{r}
-set.seed(234)
-val_set <- validation_split(try_other, 
+set.seed(123)
+splits <- initial_split(all_data, strata = adverse)
+train <- training(splits)
+test <- testing(splits)
+
+val_set <- validation_split(test, 
                             strata = adverse, 
                             prop = 0.70)
 val_set
 ```
+
+
 
 BUILD THE MODEL
 
@@ -145,16 +186,25 @@ lr_mod <-
   logistic_reg(penalty = tune(), mixture = 1) %>% 
   set_engine("glmnet")
 ```
-Create recip
+Create recipe
 ```{r}
 lr_recipe <- 
-  recipe(adverse ~ ., data = try_other) %>%
-  update_role(client, zip3, new_role = "ID")%>%
-  update_role( actual, new_role = "future")
+  recipe(adverse ~ ., data = train) %>%
+  update_role(client, zip3, year, new_role = "ID")%>%
+  update_role( actual, ae, rate_deaths, new_role = "future")%>%
+  update_role('Percent adults fully vaccinated against COVID-19 (as of 6/10/21)', new_role = "future")
+  #step_normalize(all_numeric_predictors())
+  #update_role(month, new_role = "ID")
+  #update_role(per_blue_collar,'less than high school', 'high school','bachelor',  new_role = "ignore")%>%
+  #update_role(per_other, per_green, per_lib, new_role = "ignore")%>%
+  #update_role('CVAC level of concern for vaccination rollout', new_role = 'ignore')
+
   #remove_role(actual_ae, old_role = "predictor")
 ```
-
-Creat workflow
+```{r}
+summary(lr_recipe)
+```
+Create workflow
 ```{r}
 lr_workflow <- 
   workflow() %>% 
@@ -163,9 +213,9 @@ lr_workflow <-
 ```
 Create the grid for tuning 
 ```{r}
-lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 100))
 
-lr_reg_grid %>% top_n(-5)
+#lr_reg_grid %>% top_n(-5)
 ```
 Train and tune the model
 ```{r}
@@ -175,10 +225,6 @@ lr_res <-
             grid = lr_reg_grid,
             control = control_grid(save_pred = TRUE),
             metrics = metric_set(roc_auc))
-```
-
-```{r}
-tidy()
 ```
 
 ```{r}
@@ -207,7 +253,7 @@ lr_best <-
   lr_res %>% 
   collect_metrics() %>% 
   arrange(penalty) %>% 
-  slice(40)
+  slice(34)
 ```
 
 ```{r}
@@ -218,96 +264,86 @@ lr_auc <-
   mutate(model = "Logistic Regression")
 
 autoplot(lr_auc)
+
+lr_best<- lr_res %>% 
+  collect_predictions(parameters = lr_best)
 ```
 
-```{r}
-lr_res %>% 
-  collect_predictions(parameters = lr_best) 
-```
+Hence we choose penalty = 0.001 as the final penalized logistic regression model
 
-
-
-
-#penalized logistic regression model
 ```{r}
 lr_mod <- 
-  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  logistic_reg(penalty = 0.001, mixture = 1) %>% 
   set_engine("glmnet")
-```
-Create recip
-```{r}
-lr_recipe <- 
-  recipe(adverse ~ ., data = try_other) %>%
-  update_role(client, zip3, new_role = "ID")%>%
-  update_role( actual, new_role = "future")
-  #remove_role(actual_ae, old_role = "predictor")
-```
 
-Creat workflow
-```{r}
 lr_workflow <- 
   workflow() %>% 
   add_model(lr_mod) %>% 
   add_recipe(lr_recipe)
 ```
-Create the grid for tuning 
+Train the workflow
 ```{r}
-lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
-
-lr_reg_grid %>% top_n(-5)
+pred_logit_train<-lr_workflow%>%
+  fit(data = train)
+pred_logit_train %>%
+  pull_workflow_fit() %>%
+  tidy()
 ```
-Train and tune the model
+And we predict
 ```{r}
-lr_res <- 
-  lr_workflow %>% 
-  tune_grid(val_set,
-            grid = lr_reg_grid,
-            control = control_grid(save_pred = TRUE),
-            metrics = metric_set(roc_auc))
+  pred <- predict(pred_logit_train,new_data = test)
+#Compute the confusion matrix
+pred %>%
+  bind_cols(test %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
 ```
+It seems all company's adverse is 1. 
+(I think it is not that good....need improve!)
+
+(probably we doesn't consider the effect from vaccine/wfh/mask at the late 2020)
 
 ```{r}
-tidy()
-```
-
-```{r}
-lr_plot <- 
-  lr_res %>% 
-  collect_metrics() %>% 
-  ggplot(aes(x = penalty, y = mean)) + 
-  geom_point() + 
-  geom_line() + 
-  ylab("Area under the ROC Curve") +
-  scale_x_log10(labels = scales::label_number())
-
-lr_plot 
+  pred <- predict(pred_logit_train,new_data = test2)
+#Compute the confusion matrix
+pred %>%
+  bind_cols(test2 %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
 ```
 
-```{r}
-top_models <-
-  lr_res %>% 
-  show_best("roc_auc", n = 50) %>% 
-  arrange(penalty) 
-top_models
-```
 
 ```{r}
-lr_best <- 
-  lr_res %>% 
-  collect_metrics() %>% 
-  arrange(penalty) %>% 
-  slice(40)
+lr_test <-lr_recipe%>%
+  prep()
+pred_logit_train1<-bake(lr_test, new_data = train)
+
+```
+```{r}
+a<-try_test%>%select(adverse)%>% factor(adverse)
+```
+```{r}
+pred_test<-predict(pred_logit_train, new_data = try_test)
+metrics(pred_test,a,predicted)
+
 ```
 
 ```{r}
-lr_auc <- 
-  lr_res %>% 
-  collect_predictions(parameters = lr_best) %>%
-  roc_curve(adverse, .predictions_adverse) %>% 
-  mutate(model = "Logistic Regression")
-
-autoplot(lr_auc)
+last_fit(
+  pred_logit_train,
+  try_test
+) %>%
+  collect_metrics()
 ```
+
+
+```
+
+
+
+
+
+
+
+
 
 
 
