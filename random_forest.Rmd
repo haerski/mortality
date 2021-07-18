@@ -31,6 +31,7 @@ clients <-
     adverse = as.factor(ae_2020 > 1.1)
   ) %>%
   relocate(adverse, ae_2020, .after = zip3)
+clients
 ```
 
 We can add some demographic information based on zip3.
@@ -63,6 +64,7 @@ zip_data <-
     cvac = `CVAC level of concern for vaccination rollout`,
     income = Median_Household_Income_2019
   )
+zip_data
 ```
 There seems to be some clients with some zip codes that we cannot deal with. These are the ones
 ```{r}

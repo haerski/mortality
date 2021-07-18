@@ -1,0 +1,198 @@
+---
+title: "XGboost"
+author: "Lei Yang"
+date: "7/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(feather)
+library(caTools)
+library(xgboost)
+```
+
+
+
+
+```{r}
+# Load it insted of reprocessing
+per <- read_feather("data/simulation_data/all_persons.feather")
+per
+```
+Compute some summary statistic for each client.
+```{r}
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "Blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    adverse = (ae_2020 > 1.1)
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3)
+clients
+```
+
+
+
+
+
+We can add some demographic information based on zip3.
+```{r}
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    `Percent adults fully vaccinated against COVID-19 (as of 6/10/21)` = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    Unemployment_rate_2020 = NULL,
+    PCTPOVALL_2019 = NULL,
+    `Deaths involving COVID-19` = NULL,
+    `Deaths from All Causes` = NULL
+  ) %>%
+  rename(
+    nohs = `less than high school`,
+    hs = `high school`,
+    unemp = Unemployment_rate_2019,
+    hes = `Estimated hesitant`,
+    hes_uns = `Estimated hesitant or unsure`,
+    str_hes = `Estimated strongly hesitant`,
+    svi = `Social Vulnerability Index (SVI)`,
+    cvac = `CVAC level of concern for vaccination rollout`,
+    income = Median_Household_Income_2019
+  )
+zip_data
+```
+
+There seems to be some clients with some zip codes that we cannot deal with. These are the ones
+```{r}
+clients %>%
+  anti_join(zip_data, by = "zip3") %>%
+  select(zip3)
+```
+These correspond to the following areas
+
+ZIP3 | Area       |
+-----|------------|
+969  | Guam, Palau, Federated States of Micronesia, Northern Mariana Islands, Marshall Islands |
+093  | Military bases in Iraq and Afghanistan |
+732  | Not in use |
+872  | Not in use |
+004  | Not in use |
+
+We ignore clients with these zip codes.
+```{r}
+clients %<>%
+  inner_join(zip_data, by = "zip3")
+```
+
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+```{r}
+clients
+```
+
+```{r}
+clients1<-clients %>%
+  mutate( zip3=NULL,
+          client=NULL, 
+          actual_2020=NULL,
+          )
+
+clients1
+```
+
+
+#train test split
+
+Create an initial test-train split
+```{r}
+init_split <-
+  clients1 %>%
+  initial_split(strata = adverse)
+
+clients1_test <- init_split %>% testing()
+clients1_test %>% count(adverse)
+clients1_train <- init_split %>% training()
+clients1_train %>% count(adverse)
+```
+
+
+
+
+
+
+```{r}
+#library(caTools)
+#set.seed(123)
+#split = sample.split( clients, #dataset$Exited,
+#  SplitRatio = 0.8)
+#training_set = subset(clients, split == TRUE)
+#test_set = subset(clients, split == FALSE)
+```
+
+
+## First model
+We will use a XGboost using the tidymodels framework.
+# Fitting XGBoost to the Training set
+```{r}
+classifier = xgboost(data = as.matrix(clients1_train[-1][-1]), label = clients1_train$ae_2020, nrounds = 150)
+```
+
+# Predicting the Test set results
+```{r}
+y_pred = predict(classifier, newdata = as.matrix(clients1_test[-1][-1]))
+y_pred = (y_pred >= 1.1)
+y_pred
+```
+```{r}
+clients1_test[, 1]
+skim(clients1_test[, 1])
+
+```
+
+
+
+# Making the Confusion Matrix
+```{r}
+cm = table(as.matrix(clients1_test[1]), y_pred)
+cm
+cm[2,2]
+```
+# Applying k-Fold Cross Validation
+# install.packages('caret')
+```{r}
+library(caret)
+folds = createFolds(clients1_train$ae_2020, k = 10)
+cv = lapply(folds, function(x) {
+  training_fold = clients1_train[-x, ]
+  test_fold = clients1_test[x, ]
+  classifier = xgboost(data = as.matrix(training_fold[-1][-1]), label = training_fold$ae_2020, nrounds = 150)
+  y_pred = predict(classifier, newdata = as.matrix(test_fold[-1][-1]))
+  y_pred = (y_pred >= 1.1)
+  cm = table(as.matrix(test_fold[1]), y_pred)
+  print(cm)
+  accuracy=1
+  return(accuracy)
+})
+accuracy = mean(as.numeric(cv))
+accuracy
+```
