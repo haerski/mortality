@@ -1,16 +1,60 @@
 ```{r}
   library(tidyverse)
   library(feather)
-  library(caret)
   library(ggplot2)
+  library(tidymodels)  
+  library(readr)       # for importing data
+  library(vip)
+  library(lubridate)
+  library(usemodels)
+  library(foreign)
 ```
-
-Read simulate data
+#Read the first simulate data
 ```{r}
-  experience <- readRDS("simulation_data/experience_weekly_1.RDS")
+  experience <- readRDS("data/simulation_data/experience_weekly_1.RDS")
   experience$death[experience$death==2] <- 1
   
-  person <-readRDS("simulation_data/person_1.RDS")
+  person <-readRDS("data/simulation_data/person_1.RDS")
+```
+
+
+#Read all simulate data(my mac cannot read all 10 data set, next time try another pc)
+```{r}
+## create and view an object with file names and full paths
+f <- file.path("data/simulation_data", c("experience_weekly_1.RDS",
+    "experience_weekly_2.RDS","experience_weekly_3.RDS","experience_weekly_4.RDS",
+    "experience_weekly_5.RDS","experience_weekly_6.RDS","experience_weekly_7.RDS",
+    "experience_weekly_8.RDS","experience_weekly_9.RDS","experience_weekly_10.RDS"))
+for (data in f){
+  # Create the first data if no data exist yet
+  if (!exists("experience")){
+    experience <- readRDS(data)
+  }
+  # if data already exist, then append it together
+  if (exists("experience")){
+    tempory <-readRDS(data)
+    experience <-unique(rbind(experience, tempory))
+    rm(tempory)
+  }
+}
+```
+```{r}
+f <- file.path("data/simulation_data", c("person_1.RDS",
+    "person_2.RDS","person_3.RDS","person_4.RDS",
+    "person_5.RDS","person_6.RDS","person_7.RDS",
+    "person_8.RDS","person_9.RDS","person_10.RDS"))
+for (data in f){
+  # Create the first data if no data exist yet
+  if (!exists("person")){
+    person<- readRDS(data)
+  }
+  # if data already exist, then append it together
+  if (exists("person")){
+    tempory <-readRDS(data)
+    person<-unique(rbind(person, tempory))
+    rm(tempory)
+  }
+}
 ```
 
 
@@ -43,7 +87,7 @@ delete the test data in case we don't have enough memory
 
 calculate the k-month ae value
 ```{r}
-  k = 12
+  k = 1
   actual_ae <- experience %>%
     left_join(person, by = c("client", "participant"))%>%
     select(-industry, -Age, -collar, -Sex)%>%
@@ -52,11 +96,46 @@ calculate the k-month ae value
     summarise(actual = sum(death) * FaceAmt, expect = sum(qx) * FaceAmt) %>%
     ungroup()%>%
     group_by(client, zip3, year, month)%>%
-    #mutate(size = max(participant))%>%
+    #mutate(size = n())%>%
     summarise(actual = sum(actual), expect = sum(expect)) %>%
     mutate(ae = actual / expect)%>%
     mutate(adverse = ifelse(ae > 1.1, 1, 0),
     adverse = factor(adverse))%>%
+    ungroup()%>%
+    group_by(client)
+```
+monthly data
+```{r}
+  k = 1
+  actual_ae <- experience %>%
+    left_join(person, by = c("client", "participant"))%>%
+    #mutate(kmonth = (month-1) %/% k)%>%
+    #group_by(client, participant,zip3,  kmonth, year)%>%
+    group_by(client, participant,zip3, year,month)%>%
+    summarise(actual = sum(death) * FaceAmt, 
+              expect = sum(qx) * FaceAmt, 
+              FaceAmt = FaceAmt,
+              qx = sum(qx),
+              sex = Sex,
+              age = Age, 
+              industry = industry,
+              collar = collar) %>%
+    ungroup()%>%
+    group_by(client, zip3, year, month)%>%
+    #group_by(client, zip3, year)%>%
+    summarise(actual = sum(actual), 
+              expect = sum(expect), 
+              size = n(),
+              volume = sum(FaceAmt),
+              avg_qx = mean(qx),
+              avg_age = mean(age),
+              per_male = sum(sex == "Male") / size,
+              per_blue_collar = sum(collar == "blue") / size,
+              ) %>%
+    mutate(ae = actual / expect)%>%
+    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    adverse = factor(adverse))%>%
+    relocate(adverse, ae, .after = zip3)%>%
     ungroup()%>%
     group_by(client)
 ```
@@ -96,22 +175,24 @@ Build model:
 Prepare data:
     -read other data and select the variable we think it is useful 
 ```{r}
-otherdata <- read_feather("data.feather")%>%
+otherdata <- read_feather("data/data.feather")%>%
   select(-Unemployment_rate_2019,-'Deaths involving COVID-19', -'Deaths from All Causes',
          -HU,-AREA)
   
 ```
     -merge data
 ```{r}
-try1 <-merge(actual_ae, otherdata, by = "zip3")%>%
+all_data<-merge(actual_ae, otherdata, by = "zip3")%>%
     mutate(zip3 = factor(zip3)) %>%
     mutate(density = POP / AREALAND, AREALAND = NULL)%>%
     mutate(adverse = ifelse(ae > 1.1, 1, 0),
-    adverse = factor(adverse))
+    adverse = factor(adverse))%>%
+    filter(year!=2020)%>%
+    mutate(month = (year-2020)*12+month)
 ```
 
 ```{r}
-try1 %>% 
+all_data %>% 
   count(adverse) %>% 
   mutate(prop = n/sum(n))
 ```
@@ -124,16 +205,13 @@ try1 %>%
 Split data
 ```{r}
 set.seed(123)
-splits <- initial_split(try1, strata = adverse)
-try_other <- training(splits)
-try_test  <- testing(splits)
-```
+splits <- initial_split(all_data, strata = adverse)
+train <- training(splits)
+test <- testing(splits)
 
-```{r}
-set.seed(234)
-val_set <- validation_split(try_other, 
+val_set <- validation_split(test, 
                             strata = adverse, 
-                            prop = 0.70)
+                            prop = 0.80)
 val_set
 ```
 
@@ -148,10 +226,26 @@ lr_mod <-
 Create recip
 ```{r}
 lr_recipe <- 
-  recipe(adverse ~ ., data = try_other) %>%
+  recipe(adverse ~ ., data = train) %>%
   update_role(client, zip3, new_role = "ID")%>%
-  update_role( actual, ae, new_role = "future")
+  update_role( actual, ae,  new_role = "future")%>%
+  update_role('Percent adults fully vaccinated against COVID-19 (as of 6/10/21)', new_role = "future")%>%
+  #step_normalize(all_numeric_predictors())
+  #update_role(month, new_role = "ID")
+  step_rm(per_blue_collar)%>%
+  step_rm(year)%>%
+   #'less than high school', 'high school','bachelor')%>%
+  step_rm(per_rep,per_other, per_green, per_lib)%>%
+  #update_role('CVAC level of concern for vaccination rollout', new_role = 'ignore')
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_predictors(), -all_nominal())
   #remove_role(actual_ae, old_role = "predictor")
+```
+Check recipe
+```{r}
+lr_recipe%>%
+  prep(all_data)%>%
+  bake(NULL)
 ```
 Create workflow
 ```{r}
@@ -162,9 +256,11 @@ lr_workflow <-
 ```
 Create the grid for tuning 
 ```{r}
-lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
+#lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 60))
 
-lr_reg_grid %>% top_n(-5)
+#lr_reg_grid %>% top_n(-5)
+lr_reg_grid <- grid_regular(penalty(), levels = 100)
+#lr_reg_grid
 ```
 Train and tune the model
 ```{r}
@@ -173,38 +269,41 @@ lr_res <-
   tune_grid(val_set,
             grid = lr_reg_grid,
             control = control_grid(save_pred = TRUE),
-            metrics = metric_set(roc_auc))
+            metrics = metric_set(sens, spec, roc_auc, j_index, accuracy))
+
+autoplot(lr_res)
 ```
 
 ```{r}
 lr_plot <- 
   lr_res %>% 
   collect_metrics() %>% 
-  ggplot(aes(x = penalty, y = mean)) + 
+  ggplot(aes(x = penalty, y = mean, color = .metric)) + 
   geom_point() + 
   geom_line() + 
-  ylab("Area under the ROC Curve") +
+  #ylab("Area under the ROC Curve") +
   scale_x_log10(labels = scales::label_number())
 
 lr_plot 
 ```
+automatic select the best penalty
+```{r}
+lr_best<- 
+  lr_res%>%
+  show_best(metric = "roc_auc",n =50)%>%
+  slice(1)
+lr_best
+```
 
+another way to find best penalty value
 ```{r}
 top_models <-
   lr_res %>% 
-  show_best("roc_auc", n = 50) %>% 
-  arrange(penalty) 
+  show_best("accuracy", n = 50) 
 top_models
 ```
 
-```{r}
-lr_best <- 
-  lr_res %>% 
-  collect_metrics() %>% 
-  arrange(penalty) %>% 
-  slice(40)
-```
-
+plot roc_curve
 ```{r}
 lr_auc <- 
   lr_res %>% 
@@ -214,50 +313,75 @@ lr_auc <-
 
 autoplot(lr_auc)
 
-lr_best<- lr_res %>% 
-  collect_predictions(parameters = lr_best)
 ```
+Validation
 
+1. select penalty by hand 
 ```{r}
 lr_mod <- 
-  logistic_reg(penalty = 0.001, mixture = 1) %>% 
+  logistic_reg(penalty = 0.03486365, mixture = 1) %>% 
   set_engine("glmnet")
 
-lr_workflow <- 
+final_workflow <- 
   workflow() %>% 
   add_model(lr_mod) %>% 
   add_recipe(lr_recipe)
 
+pred_logit_train<-final_workflow%>%
+  fit(data = train)
+#pred_logit_train %>%
+ # pull_workflow_fit() %>%
+  #tidy()
+pred <- predict(pred_logit_train,new_data = test)
+pred %>%
+  bind_cols(test %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
+pred <- predict(pred_logit_train,new_data = train)
+pred %>%
+  bind_cols(train %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
 ```
-Validation
-
-
+2. select penalty by useful function
 ```{r}
-pred_logit_train<-lr_workflow%>%
-  fit(data = try_other)
+final_workflow<-
+  lr_workflow%>%
+  finalize_workflow(lr_best)
+#check
+final_workflow %>%
+  last_fit(splits,metrics = metric_set(sens, spec, roc_auc, j_index, accuracy))%>%
+  collect_predictions()
+```
+```{r}
+pred_logit_train<-final_workflow%>%
+  fit(data = train)
+pred <- predict(pred_logit_train,new_data = test)
+pred %>%
+  bind_cols(test %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
+pred <- predict(pred_logit_train,new_data = train)
+pred %>%
+  bind_cols(train %>% select(adverse)) %>%
+  conf_mat(adverse, .pred_class)
+```
+```{r}
 pred_logit_train %>%
   pull_workflow_fit() %>%
   tidy()
 ```
 ```{r}
-a<-try_test%>%select(adverse)%>% factor(adverse)
+final_workflow %>%
+  last_fit(splits,metrics = metric_set(sens, spec, roc_auc, j_index, accuracy))%>%
+  collect_predictions()
 ```
 ```{r}
-pred_test<-predict(pred_logit_train, new_data = try_test)
-metrics(pred_test,a,predicted)
 
+final_workflow %>%
+  last_fit(splits,metrics = metric_set(sens, spec, roc_auc, j_index, accuracy))%>%
+  pluck(".workflow", 1) %>%
+  pull_workflow_fit() %>%
+  vip(num_features = 30)
 ```
 
-```{r}
-last_fit(
-  pred_logit_train,
-  try_test
-) %>%
-  collect_metrics()
-```
-
-
-```
 
 
 
