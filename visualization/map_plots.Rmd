@@ -7,6 +7,7 @@ We use the sf library to handle geometries. We will also ignore AK and HI (to ke
 library(tidyverse)
 library(sf)
 library(feather)
+library(ggnewscale)
 
 geom <- st_read("zip_geom_no_ak_hi.shp")
 data <- read_feather("../data/data.feather")
@@ -27,10 +28,108 @@ clients %>%
   summarize() %>%
   count(sort = TRUE) %>%
   right_join(geom) %>%
-  # mutate(n = replace_na(n,0)) %>%
-  ggplot(aes(geometry = geometry)) + geom_sf(aes(fill = n)) +
-  scale_fill_fermenter(breaks = c(1, 2, 5, 10, 30), direction = 1, palette = "PuRd", na.value = "white")
+  ggplot(aes(geometry = geometry, fill = n)) + geom_sf(size = 0.1) +
+  scale_fill_fermenter(breaks = c(1, 2, 5, 10, 30), direction = 1, palette = "PuRd", na.value = "white") +
+  theme_void() +
+  labs(fill = "# of clients") +
+  theme(legend.position = "bottom")
+ggsave("images/location.png", dpi = 300, width = 9, height = 5)
 ```
 
 ### Zipcode plots
-TODO
+Population of zipcodes
+```{r}
+data %>%
+  inner_join(geom) %>%
+  ggplot(aes(geometry = geometry, fill = POP)) + geom_sf(size = 0.05) +
+  scale_fill_fermenter(direction = 1, palette = "BuGn", na.value = "white")
+```
+
+This merged dataset will be useful to draw a bunch of maps
+```{r}
+merged <-
+  clients %>%
+  select(zip3) %>%
+  unique() %>%
+  mutate(has_client = TRUE) %>%
+  right_join(data, by = "zip3") %>%
+  replace_na(list(has_client = FALSE)) %>%
+  inner_join(geom, by = "zip3")
+```
+
+Poverty in our zip3s VS others
+```{r}
+merged %>%
+  ggplot(aes(geometry = geometry)) +
+  geom_sf() +
+  geom_sf(aes(fill = PCTPOVALL_2019), data = . %>% filter(has_client == TRUE)) +
+  scale_fill_distiller(direction = 1) +
+  labs(fill = "% poverty, clients") +
+  theme(legend.position = "bottom") +
+  new_scale_fill() +
+  geom_sf(aes(fill = PCTPOVALL_2019), data = . %>% filter(has_client == FALSE)) +
+  scale_fill_distiller(palette = "BuGn", direction = 1) +
+  labs(fill = "% povery, others") +
+  theme(legend.position = "bottom")
+```
+
+Our companies tend to located in more populous areas in the US
+```{r}
+merged %>%
+  filter(has_client) %>%
+  mutate(gp = "Clients") %>%
+  rbind(merged %>% mutate(gp = "All US")) %>%
+  ggplot(aes(y = POP, x = gp)) +
+  geom_boxplot() +
+  ylab("Population in Zipcode") +
+  theme(axis.title.x = element_blank())
+ggsave("images/population_box.png")
+```
+
+Also more wealthy
+```{r}
+merged %>%
+  filter(has_client) %>%
+  mutate(gp = "Clients") %>%
+  rbind(merged %>% mutate(gp = "All US")) %>%
+  ggplot(aes(y = Median_Household_Income_2019, x = gp)) +
+  geom_boxplot() +
+  ylab("Median household income") +
+  theme(axis.title.x = element_blank())
+```
+
+Also more dense areas
+```{r}
+merged %>%
+  filter(has_client) %>%
+  mutate(gp = "Clients") %>%
+  rbind(merged %>% mutate(gp = "All US")) %>%
+  ggplot(aes(y = POP / AREALAND, x = gp)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  ylab("Population density") +
+  theme(axis.title.x = element_blank())
+```
+
+## Misc plots
+Filled column plot for AE in 2019, 2020, 2021
+```{r}
+clients %>%
+  group_by(zip3, client) %>%
+  summarize(expected = sum(qx * FaceAmt),
+            actual2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+            actual2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+            actual2021 = sum(FaceAmt[year == 2021], na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(AE2019 = actual2019 / expected,
+         AE2020 = actual2020 / expected,
+         AE2021 = actual2021 / (7 / 12 * expected)) %>%
+  pivot_longer(AE2019:AE2021, names_to = "year", names_prefix = "AE", values_to = "AE") %>%
+  mutate(adverse = as.factor(if_else(AE > 1, "Yes, AE > 1", "No, AE < 1"))) %>%
+  select(year, adverse) %>%
+  mutate(adverse = fct_reorder(adverse, desc(adverse))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar() +
+  labs(x = "Year", y = "count", fill = "Adverse death event?")
+ggsave("images/adverse.png")
+```
+
