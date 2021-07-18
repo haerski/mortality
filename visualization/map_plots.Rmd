@@ -1,0 +1,36 @@
+# Some map visualizations
+
+## Boring stuff
+
+We use the sf library to handle geometries. We will also ignore AK and HI (to keep the plots nice).
+```{r}
+library(tidyverse)
+library(sf)
+library(feather)
+
+geom <- st_read("zip_geom_no_ak_hi.shp")
+data <- read_feather("../data/data.feather")
+clients <- read_feather("../data/simulation_data/all_persons.feather")
+```
+## Actual plots!!
+### Client plots
+Zip 3 coverage
+```{r}
+geom %>%
+  ggplot() + geom_sf(aes(fill = zip3)) + guides(fill = "none")
+```
+
+Where are our companies located?
+```{r}
+clients %>%
+  group_by(zip3, client) %>%
+  summarize() %>%
+  count(sort = TRUE) %>%
+  right_join(geom) %>%
+  # mutate(n = replace_na(n,0)) %>%
+  ggplot(aes(geometry = geometry)) + geom_sf(aes(fill = n)) +
+  scale_fill_fermenter(breaks = c(1, 2, 5, 10, 30), direction = 1, palette = "PuRd", na.value = "white")
+```
+
+### Zipcode plots
+TODO
