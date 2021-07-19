@@ -133,3 +133,19 @@ clients %>%
 ggsave("images/adverse.png")
 ```
 
+```{r}
+merged %>%
+  filter(has_client) %>%
+  mutate(gp = "Clients") %>%
+  rbind(merged %>% mutate(gp = "All US")) %>%
+  select(bachelor, `Estimated hesitant`, PCTPOVALL_2019, Unemployment_rate_2019, gp) %>%
+  rename(`Percent with a bachelor` = bachelor, `Percent vaccine hesitant` = `Estimated hesitant`, `Poverty percentage` = PCTPOVALL_2019, `Unemployment rate` = Unemployment_rate_2019) %>%
+  pivot_longer(-gp, names_to = "name", values_to = "value") %>%
+  ggplot(aes(x = value, fill = gp)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ name, scales = "free") +
+  labs(fill = "Groups")
+
+ggsave("images/density.png", width = 16, height = 9)
+```
+
