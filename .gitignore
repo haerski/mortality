@@ -63,3 +63,5 @@ tags
 *.dbf
 *.prj
 *.shp
+*.xml
+*.cpg
