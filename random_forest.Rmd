@@ -289,8 +289,11 @@ final_wf_fit %>%
   collect_predictions() %>%
   roc_curve(adverse, .pred_FALSE) %>%
   autoplot()
-```
 
+final_wf_fit %>%
+  collect_predictions() %>%
+  conf_mat(adverse, .pred_class)
+```
 Cool stuff. How does this compare to logistic regression by month???
 
 We can also check variable importance

@@ -57,3 +57,11 @@ tags
 *.txt
 *.RDS
 *.rds
+
+# map files
+*.shx
+*.dbf
+*.prj
+*.shp
+*.xml
+*.cpg
