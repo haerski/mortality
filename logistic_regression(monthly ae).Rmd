@@ -9,6 +9,13 @@
   library(usemodels)
   library(foreign)
 ```
+Currently, we are not using first three month data during pandemic to predict the future, but rather we are using sample of clients to predict other clients. 
+We try two different models : logistic regression and random forest;(linear model and decision  tree).....
+ 
+We build the linear model based on penalized logistic regression to predict whether adverse mortality happens for each client in each month since Covid-19 starts.
+
+
+
 #Read the first simulate data
 ```{r}
   experience <- readRDS("data/simulation_data/experience_weekly_1.RDS")
@@ -241,11 +248,15 @@ lr_recipe <-
   step_normalize(all_predictors(), -all_nominal())
   #remove_role(actual_ae, old_role = "predictor")
 ```
+```{r}
+lr_recipe
+```
 Check recipe
 ```{r}
 lr_recipe%>%
   prep(all_data)%>%
   bake(NULL)
+
 ```
 Create workflow
 ```{r}
@@ -293,6 +304,11 @@ lr_best<-
   show_best(metric = "roc_auc",n =50)%>%
   slice(1)
 lr_best
+```
+
+```{r}
+lr_res%>%
+  show_best(metric = "accuracy")
 ```
 
 another way to find best penalty value
