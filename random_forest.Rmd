@@ -11,7 +11,6 @@ library(magrittr)
 library(skimr)
 library(vip)
 per <- read_feather("data/simulation_data/all_persons.feather")
-set.seed(123)
 ```
 
 Compute some summary statistic for each client.
@@ -44,25 +43,20 @@ zip_data <-
     AREALAND = NULL,
     AREA = NULL,
     HU = NULL,
-    `Percent adults fully vaccinated against COVID-19 (as of 6/10/21)` = NULL,
+    vaccinated = NULL,
     per_lib = NULL,
     per_green = NULL,
     per_other = NULL,
     per_rep = NULL,
-    Unemployment_rate_2020 = NULL,
-    PCTPOVALL_2019 = NULL,
-    `Deaths involving COVID-19` = NULL,
-    `Deaths from All Causes` = NULL
+    unempl_2020 = NULL,
+    poverty = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
   ) %>%
   rename(
-    nohs = `less than high school`,
-    hs = `high school`,
-    unemp = Unemployment_rate_2019,
-    hes = `Estimated hesitant`,
-    hes_uns = `Estimated hesitant or unsure`,
-    str_hes = `Estimated strongly hesitant`,
-    svi = `Social Vulnerability Index (SVI)`,
-    cvac = `CVAC level of concern for vaccination rollout`,
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
     income = Median_Household_Income_2019
   )
 ```
@@ -81,11 +75,13 @@ ZIP3 | Area       |
 732  | Not in use |
 872  | Not in use |
 004  | Not in use |
+202  | Washington DC, Government 1 |
 
-We ignore clients with these zip codes.
+We ignore clients with these zip codes. There are also two clients in DC for which we're missing election data. We will ignore those as well.
 ```{r}
 clients %<>%
-  inner_join(zip_data, by = "zip3")
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
 ```
 
 We now have our full dataset. Behold!
@@ -96,7 +92,7 @@ skim(clients)
 ## First model
 We will use a random forest using the tidymodels framework.
 
-We start by creating a recipe. We won't use zip3, client ID, actual claims, or ae_2020 as predictors.
+We start by creating a recipe. We won't use zip3, client ID, actual claims, or ae_2020 as predictors. Also, we don't have election data on DC, so we remove those.
 ```{r}
 ranger_recipe <-
   recipe(adverse ~ ., data = clients) %>%
@@ -122,6 +118,7 @@ ranger_workflow <-
 
 Create an initial test-train split
 ```{r}
+set.seed(1111)
 init_split <-
   clients %>%
   initial_split(strata = adverse)
@@ -149,7 +146,7 @@ predictions <-
 Compute the confusion matrix
 ```{r}
 predictions %>%
-  bind_cols(clients_test %>% select(adverse)) %>%
+  bind_cols(clients_test %>% filter(!is.na(per_dem)) %>% select(adverse)) %>%
   conf_mat(adverse, .pred_class)
 ```
 
@@ -178,13 +175,13 @@ ranger_last_fit %>%
 We will make train the model for more adverse outcomes by using *subsampling*. See e.g. [here](https://www.tidymodels.org/learn/models/sub-sampling/) for a nice introduction.
 ```{r}
 library(themis)
+set.seed(222)
 subsample_recipe <-
   ranger_recipe %>%
   step_rose(adverse)
 subsample_workflow <-
   ranger_workflow %>%
   update_recipe(subsample_recipe)
-
 subsample_last_fit <-
   subsample_workflow %>%
   last_fit(
@@ -217,6 +214,7 @@ clients %<>%
 
 We can apply the same workflow as before
 ```{r}
+set.seed(333)
 new_split <-
   clients %>%
   initial_split()
@@ -248,12 +246,14 @@ tune_workflow <-
   ranger_workflow %>%
   update_model(tune_spec)
 
+set.seed(444)
 tune_split <- initial_split(clients)
+set.seed(555)
 tune_resamples <-
   vfold_cv(training(tune_split))
 
 param_grid <-
-  grid_regular(mtry(c(1,23)),
+  grid_regular(mtry(c(1, 23)),
                min_n(),
                levels = 5)
 
@@ -268,9 +268,9 @@ tune_res <-
 autoplot(tune_res)
 ```
 
-I chose mtry = 17, min_n = 2.
+I chose mtry = 12, min_n = 21.
 ```{r}
-best <- tibble(mtry = 17, min_n = 2)
+best <- tibble(mtry = 12, min_n = 21)
 final_wf <-
   tune_workflow %>%
   finalize_workflow(best)
