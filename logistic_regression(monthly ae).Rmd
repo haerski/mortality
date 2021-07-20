@@ -19,9 +19,15 @@ We build the linear model based on penalized logistic regression to predict whet
 #Read the first simulate data
 ```{r}
   experience <- readRDS("data/simulation_data/experience_weekly_1.RDS")
-  experience$death[experience$death==2] <- 1
+  #experience$death[experience$death==2] <- 1
   
   person <-readRDS("data/simulation_data/person_1.RDS")
+```
+
+```{r}
+   experience%>%
+      #filter(death == 2)
+      filter(client == 22, participant == 140)
 ```
 
 
@@ -417,123 +423,6 @@ final_workflow %>%
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-I choose this one because there is detail example online.(not finished)
-
--LightGBM: 
-```{r}
-library(data.table)
-library(Matrix)
-library(dplyr)
-library(MLmetrics)
-library(lightgbm)
-```
-
--Split data
-     -Simple Splitting Based on the Outcome
-```{r}
-set.seed(3456)
-trainIndex <- createDataPartition(try1$adverse, p = .8, 
-                                  list = FALSE, 
-                                  times = 1)
-```
-```{r}
-Train <- try1[ trainIndex,]
-Test <- try1[-trainIndex,]
-```
-Pre-processing
-```{r}
-median.impute = function(x){
-  x = as.data.frame(x)
-  for (i in 1:ncol(x)){
-    x[which(x[,i]== -1),i] = NA
-  }
-  
-  x = x %>% mutate_all(~ifelse(is.na(.), median(., na.rm = TRUE), .)) %>% as.data.table()
-  return(x)
-}
-
-Train = median.impute(Train)
-Test  = median.impute(Test)
-```
-Feature Engineering
-```{r}
-Test$ae = NA
-data = rbind(Train, Test)
-
-data[, fe_amount_NA := rowSums(data == -1, na.rm = T)]
-```
-
-Create LGB Dataset
-```{r}
-varnames = setdiff(colnames(data), c("client", "ae"))
-train_sparse = Matrix(as.matrix(data[!is.na(ae), varnames, with=F]), sparse=TRUE)
-test_sparse  = Matrix(as.matrix(data[is.na(ae) , varnames, with=F]), sparse=TRUE)
-
-y_train  = data[!is.na(ae),ae]
-test_ids = data[is.na(ae) ,client]
-
-lgb.train = lgb.Dataset(data=train_sparse, label=y_train)
-
-categoricals.vec = colnames(train)[c(grep("cat",colnames(train)))]
-```
-
-Setting up LGBM Parameters
-```{r}
-
-lgb.grid = list(objective = "binary",
-                metric = "auc",
-                min_sum_hessian_in_leaf = 1,
-                feature_fraction = 0.7,
-                bagging_fraction = 0.7,
-                bagging_freq = 5,
-                min_data = 100,
-                max_bin = 50,
-                lambda_l1 = 8,
-                lambda_l2 = 1.3,
-                min_data_in_bin=100,
-                min_gain_to_split = 10,
-                min_data_in_leaf = 30,
-                is_unbalance = TRUE)
-```
-
-Setting up Gini Eval Function
-```{r}
-# Gini for Lgb
-lgb.normalizedgini = function(preds, dtrain){
-  actual = getinfo(dtrain, "label")
-  score  = NormalizedGini(preds,actual)
-  return(list(name = "gini", value = score, higher_better = TRUE))
-}
-```
-Train Final Model
-```{r}
-best.iter = 525
-# Train final model
-lgb.model = lgb.train(params = lgb.grid, data = lgb.train, learning_rate = 0.02,
-                      num_leaves = 25, num_threads = 2 , nrounds = best.iter,
-                      eval_freq = 20, eval = lgb.normalizedgini,
-                      categorical_feature = categoricals.vec)
-```
-
-```{r}
-preds = data.table(id=test_ids, target=predict(lgb.model,test_sparse))
-colnames(preds)[1] = "id"
-fwrite(preds, "submission.csv")
-```
 
 
 
