@@ -62,12 +62,12 @@ Poverty in our zip3s VS others
 merged %>%
   ggplot(aes(geometry = geometry)) +
   geom_sf() +
-  geom_sf(aes(fill = PCTPOVALL_2019), data = . %>% filter(has_client == TRUE)) +
+  geom_sf(aes(fill = poverty), data = . %>% filter(has_client == TRUE)) +
   scale_fill_distiller(direction = 1) +
   labs(fill = "% poverty, clients") +
   theme(legend.position = "bottom") +
   new_scale_fill() +
-  geom_sf(aes(fill = PCTPOVALL_2019), data = . %>% filter(has_client == FALSE)) +
+  geom_sf(aes(fill = poverty), data = . %>% filter(has_client == FALSE)) +
   scale_fill_distiller(palette = "BuGn", direction = 1) +
   labs(fill = "% povery, others") +
   theme(legend.position = "bottom")
@@ -138,8 +138,8 @@ merged %>%
   filter(has_client) %>%
   mutate(gp = "Clients") %>%
   rbind(merged %>% mutate(gp = "All US")) %>%
-  select(bachelor, `Estimated hesitant`, PCTPOVALL_2019, Unemployment_rate_2019, gp) %>%
-  rename(`Percent with a bachelor` = bachelor, `Percent vaccine hesitant` = `Estimated hesitant`, `Poverty percentage` = PCTPOVALL_2019, `Unemployment rate` = Unemployment_rate_2019) %>%
+  select(bachelor, hes, poverty, unempl_2019, gp) %>%
+  rename(`Percent with a bachelor` = bachelor, `Percent vaccine hesitant` = hes, `Poverty percentage` = poverty, `Unemployment rate` = unempl_2019) %>%
   pivot_longer(-gp, names_to = "name", values_to = "value") %>%
   ggplot(aes(x = value, fill = gp)) +
   geom_density(alpha = 0.5) +
