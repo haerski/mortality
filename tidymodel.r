@@ -2,28 +2,37 @@ library(tidyverse)
 library(tidymodels)
 library(feather)
 
-exp <- read_rds("data/simulation_data/experience_weekly_1.RDS")
-per <- read_rds("data/simulation_data/person_1.RDS")
+read_data <- function(n) {
+  exp_name <- str_glue("data/simulation_data/experience_weekly_{n}.RDS")
+  per_name <- str_glue("data/simulation_data/person_{n}.RDS")
+  exp <- read_rds(exp_name)
+  per <- read_rds(per_name)
+
+  dies <-
+    exp %>%
+    filter(death == 1) %>%
+    select(client, participant, week, month, year)
+  aug_per <-
+    per %>%
+    left_join(dies, by = c("client", "participant"))
+
+  aug_per
+}
+
+all_persons <- (1:10) %>% map_dfr(read_data)
+
 qx_table <- read_csv("data/soa_base_2017.csv")
 
-dies <-
-  exp %>%
-  filter(death == 1) %>%
-  select(client, participant, week, month, year)
+all_persons <-
+  all_persons %>%
+  left_join(qx_table, by = c("Age", "Sex", "collar")) %>%
+  relocate(qx, .after = collar)
 
-aug_per <-
-  per %>%
-  left_join(dies, by = c("client", "participant")) %>%
-  left_join(qx_table, by = c("Age", "Sex", "collar"))
+# This generates a data frame with all individual and date of death (NULL if they don't die)
+write_feather(all_persons, "data/simulation_data/all_persons.feather")
 
-
-write_feather(aug_per, "data/simulation_data/per_1.feather")
-
-aug_per <- read_feather("data/simulation_data/per_1.feather")
-
-per <- aug_per
-per
-
+# Load it insted of reprocessing
+per <- read_feather("data/simulation_data/all_persons.feather")
 
 # This is how much we expect to pay for each client in a year
 exp <-
@@ -60,15 +69,14 @@ exp <-
   replace_na(list(actual2021 = 0)) %>%
   mutate(AE2019 = actual2019 / expected) %>%
   mutate(AE2020 = actual2020 / expected) %>%
-  mutate(AE2021 = actual2021 / expected)
+  mutate(AE2021 = actual2021 / ((7 / 12) * expected))
 
 exp
 
 other_data <-
   read_feather("data/data.feather") %>%
-  select(zip3, POP, AREALAND, `Deaths involving COVID-19`, per_dem, `Social Vulnerability Index (SVI)`, `CVAC level of concern for vaccination rollout`) %>%
-  rename(covid_deaths = `Deaths involving COVID-19`, svi = `Social Vulnerability Index (SVI)`, cvac = `CVAC level of concern for vaccination rollout`) %>%
-  mutate(density = POP / AREALAND, AREALAND = NULL)
+  select(zip3, POP, AREALAND, deaths_covid, per_dem, svi, cvac) %>%
+  rename(covid_deaths = deaths_covid, AREALAND = NULL)
 
 data <-
   exp %>%
@@ -81,6 +89,7 @@ glimpse(data)
 data %>%
   count(Y)
 
+## MODELLING ##
 splits <- initial_split(data, strata = Y)
 data_test <- testing(splits)
 data_train <- training(splits)
@@ -93,7 +102,8 @@ data_train %>%
 client_rec <-
   recipe(Y ~ ., data = data_train) %>%
   update_role(client, new_role = "client ID") %>%
-  update_role(actual2020, actual2021, AE2020, AE2021, new_role = "future")
+  update_role(actual2020, actual2021, AE2020, AE2021, new_role = "future") %>%
+  step_naomit(POP, per_dem)
 
 summary(client_rec)
 
@@ -111,12 +121,12 @@ rf_fit <-
   rf_wf %>%
   fit(data_train)
 
-summary(rf_fit)
-
 rf_fit %>%
   pull_workflow_fit()
 
-rf_pref <-
+rf_pred <-
   rf_fit %>%
   predict(data_test)
 
+rf_pred
+data_test$Y
