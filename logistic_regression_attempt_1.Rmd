@@ -184,12 +184,30 @@ reg_2_tune %>%
   filter(.metric == "sens") %>%
   arrange(desc(mean))
 
+```
 
-  group_by(penalty) %>%
-  arrange(
+# We have found the best tuning parameter and now we have to use it
+```{r}
+reg_2_tuned_workflow <- reg_2_workflow %>% 
+  finalize_workflow(parameters=list(penalty=0.00118))
 
-reg_2_tune %>% show_best(metric = "sens", n = 10)
+reg_2_tuned_fit <- reg_2_tuned_workflow %>%
+  last_fit(reg_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
+```
 
+# Comparing the firts model with the penalysed model (with the best tuning paramter)
+```{r}
+collect_metrics(reg_2_tuned_fit)
+collect_metrics(reg_fit)
+```
 
-show_best(metric = "bal_accuracy", n = 10)
+# For each of the client in our test set, let's have a look at the predicted target variable and the actual adverse variable.  
+```{r}
+reg_2_tuned_fit %>% 
+  collect_predictions()
+```
+
+```{r}
+reg_2_tuned_fit %>%
+  roc_curve()
 ```
