@@ -1,0 +1,165 @@
+```{r}
+library(sf)
+library(purrr)
+library(raster)
+library(dplyr)
+library(spData)
+library(spDataLarge)
+library(tmap)    # for static and interactive maps
+library(leaflet) # for interactive maps
+library(ggplot2) # tidyverse data visualization package
+library(feather)
+library(tidyr)
+
+```
+
+
+
+
+```{r}
+df<- read_feather("data/simulation_data/all_persons.feather")
+df2<- read_feather("data/data.feather")
+```
+
+```{r}
+data<- left_join(df,df2,by="zip3")
+data
+```
+
+```{r}
+ggplot(data, aes(x = qx)) + 
+    geom_histogram()
+ggplot(data, aes(x = Age )) + 
+    geom_histogram()
+ggplot(data, aes(x = FaceAmt )) + 
+    geom_histogram()
+ggplot(data, aes(x = R_death )) + 
+    geom_histogram()
+ggplot(data, aes(x = college )) + 
+    geom_histogram()
+ggplot(data, aes(x = Median_Household_Income_2019 )) + 
+    geom_histogram()
+ggplot(data, aes(x = POP )) + 
+    geom_histogram()
+ggplot(data, aes(x = per_dem )) + 
+    geom_histogram()
+
+```
+
+```{r}
+ggplot(data, aes(x = FaceAmt , fill = Sex)) + 
+  geom_density()
+ggplot(data, aes(y = FaceAmt, fill = Sex)) + 
+  geom_boxplot()
+```
+
+```{r}
+ggplot(data, aes(y = participant, x = FaceAmt)) + 
+  geom_point()
+```
+```{r}
+data1<- data %>% 
+group_by(client) %>%
+  summarize(expected = sum(qx * FaceAmt), zip3 = first(zip3))
+data1
+```
+```{r}
+act_2019 <-
+  data %>%
+  filter(year == 2019) %>%
+  group_by(client) %>%
+  summarize(actual2019 = sum(FaceAmt))
+act_2020 <-
+  data %>%
+  filter(year == 2020) %>%
+  group_by(client) %>%
+  summarize(actual2020 = sum(FaceAmt))
+act_2021 <-
+  data %>%
+  filter(year == 2021) %>%
+  group_by(client) %>%
+  summarize(actual2021 = sum(FaceAmt))
+```
+```{r}
+data <-
+  data %>%
+  left_join(act_2019) %>%
+  left_join(act_2020) %>%
+  left_join(act_2021) %>%
+  left_join(data1) %>% 
+  replace_na(list(actual2019 = 0)) %>%
+  replace_na(list(actual2020 = 0)) %>%
+  replace_na(list(actual2021 = 0)) %>%
+  mutate(AE2019 = actual2019 / expected) %>%
+  mutate(AE2020 = actual2020 / expected) %>%
+  mutate(AE2021 = actual2021 / expected) %>% 
+  rename(covid_deaths= "Deaths involving COVID-19")
+
+```
+```{r}
+data
+```
+```{r}
+ggplot(data, aes(x = covid_deaths, y = AE2020)) + 
+  geom_point()
+```
+
+```{r}
+data %>%
+  ggplot(aes(x = participant)) +
+  geom_bar() +
+  facet_wrap(vars(client), ncol = 10) 
+```
+
+
+
+
+
+
+
+
+```{r}
+ggplot(data, aes(x = covid_deaths, y = AE2020)) + 
+  geom_point()
+```
+
+
+```{r}
+data %>% 
+  keep(is.numeric) %>%                     # Keep only numeric columns
+  gather() %>%                             # Convert to key-value pairs
+  ggplot(aes(value)) +                     # Plot the values
+    facet_wrap(~ key, scales = "free") +   # In separate panels
+    geom_density()   
+```
+
+
+```{r}
+map_US=tm_shape(us_states) + tm_fill(col = "total_pop_10")
+map_US
+```
+```{r}
+dim(us_states)
+```
+
+
+
+```{r}
+us_states_map = tm_shape(us_states, projection = 2163) + tm_polygons() + 
+  tm_layout(frame = FALSE)
+```
+
+```{r}
+hawaii_map = tm_shape(hawaii) + tm_polygons() + 
+  tm_layout(title = "Hawaii", frame = FALSE, bg.color = NA, 
+            title.position = c("LEFT", "BOTTOM"))
+alaska_map = tm_shape(alaska) + tm_polygons() + 
+  tm_layout(title = "Alaska", frame = FALSE, bg.color = NA)
+```
+
+```{r}
+us_states_map
+print(hawaii_map, vp = grid::viewport(0.35, 0.1, width = 0.2, height = 0.1))
+print(alaska_map, vp = grid::viewport(0.15, 0.15, width = 0.3, height = 0.3))
+```
+
