@@ -1,0 +1,65 @@
+```{r}
+library(dplyr)
+library(tmap)    # for static and interactive maps
+library(ggplot2) # tidyverse data visualization package
+library(feather)
+library(tidyr)
+```
+
+```{r}
+df<- read_feather("data/simulation_data/all_persons.feather")
+df2<- read_feather("data/data.feather")
+data<- left_join(df,df2,by="zip3")
+data1<- data %>% 
+group_by(client) %>%
+  summarize(expected = sum(qx * FaceAmt), zip3 = first(zip3))
+```
+
+```{r}
+act_2019 <-
+  data %>%
+  filter(year == 2019) %>%
+  group_by(client) %>%
+  summarize(actual2019 = sum(FaceAmt))
+act_2020 <-
+  data %>%
+  filter(year == 2020) %>%
+  group_by(client) %>%
+  summarize(actual2020 = sum(FaceAmt))
+act_2021 <-
+  data %>%
+  filter(year == 2021) %>%
+  group_by(client) %>%
+  summarize(actual2021 = sum(FaceAmt))
+```
+
+
+
+```{r}
+data <-
+  data %>%
+  left_join(act_2019) %>%
+  left_join(act_2020) %>%
+  left_join(act_2021) %>%
+  left_join(data1) %>% 
+  replace_na(list(actual2019 = 0)) %>%
+  replace_na(list(actual2020 = 0)) %>%
+  replace_na(list(actual2021 = 0)) %>%
+  mutate(AE2019 = actual2019 / expected) %>%
+  mutate(AE2020 = actual2020 / expected) %>%
+  mutate(AE2021 = actual2021 / expected) %>% 
+  rename(covid_deaths= "Deaths involving COVID-19")
+```
+
+```{r}
+data %>% 
+  select(-participant,-AREA,-AREALAND,-HU,-month,-week,-year) %>% 
+  keep(is.numeric) %>%                     # Keep only numeric columns
+  gather() %>%                             # Convert to key-value pairs
+  ggplot(aes(value)) +                     # Plot the values
+    facet_wrap(~ key, scales = "free") +   # In separate panels
+    geom_density()   
+```
+```{r}
+```
+
