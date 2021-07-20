@@ -29,9 +29,10 @@ clients <-
     expected = sum(qx * FaceAmt),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
-    adverse = as.factor(ae_2020 > 3)
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
   ) %>%
-  relocate(adverse, ae_2020, .after = zip3)
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
 ```
 
 We can add some demographic information based on zip3.
@@ -134,8 +135,8 @@ reg_fit %>%
 # Penalized logistic regression Model 2 
 ```{r}
 reg_2_spec <-
-  logistic_reg(penalty = tune(), mixture =1 ) %>%
-  set_engine("glm") %>%
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
   set_mode("classification")
 reg_2_spec %>% 
   translate() 
@@ -158,13 +159,37 @@ reg_val
 # Now we want to tune
 ```{r}
 reg_penalty <- grid_regular(penalty(), levels=100)
-reg_2_tune <- reg_2_workflow %>%
-  tune_grid(reg_val, grid=reg_penalty, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
+reg_2_tune <-
+  reg_2_workflow %>%
+  tune_grid(reg_val,
+            grid = reg_penalty,
+            metrics = metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
 reg_2_tune
+
+reg_2_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "sens") %>%
+  ggplot(aes(x = penalty, y = mean)) + geom_line() + scale_x_log10() + geom_vline(xintercept = 0.00118)
+
+autoplot(reg_2_tune)
 ```
 
 ```{r}
 reg_2_tune %>%
   collect_metrics()
 
+reg_2_tune %>%
+  collect_metrics() %>%
+  filter(penalty <= 1e-2) %>%
+  filter(.metric == "sens") %>%
+  arrange(desc(mean))
+
+
+  group_by(penalty) %>%
+  arrange(
+
+reg_2_tune %>% show_best(metric = "sens", n = 10)
+
+
+show_best(metric = "bal_accuracy", n = 10)
 ```
