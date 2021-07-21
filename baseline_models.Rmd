@@ -6,6 +6,7 @@ The goal of this documents is to compare some tuned and untuned models on a "bas
 ```{r}
 library(tidyverse)
 library(tidymodels)
+library(probably)
 library(themis)
 library(feather)
 library(magrittr)
@@ -164,12 +165,13 @@ crossval <- vfold_cv(training(init), strata = adverse)
 ```
 
 Fit all models and estimate metrics using 10-fold cross-validation. We're not performing any tuning here (although we could do that very easily!!!).
-```{r}
+```{r collapse = TRUE}
 fit_wflows <-
   wflows %>%
   workflow_map(fn = "fit_resamples",
                seed = 30332,
                resamples = crossval,
+               control = control_resamples(save_pred = TRUE),
                verbose = TRUE)
 ```
 
@@ -187,3 +189,26 @@ fit_wflows %>% rank_results("roc_auc") %>% select(wflow_id) %>% unique()
 ```
 
 We will pick `basic_forest` as the "final" model.
+```{r}
+final_wflow <-
+  fit_wflows %>%
+  pull_workflow_set_result("basic_forest")
+```
+
+Right now, given a test case, tries to find the probability that `ae > 3`. If that number is greater than 0.5, the model predicts `ae > 3`, if not, the model predicts `ae < 3`. This threshold of 0.5 can be changed, which will affect specificity and sensitivity. For the 10 models coming from the 10-fold CV, we compute specificity and sensitivity for all threshold in `seq(0.5, 1, 0.01)`, that is a grid from 0.5 to 1 with step of 0.01. We then average the estimate for the 10 models to get the following plot (could have also drawn error bars...)
+```{r choosing_bin_threshold}
+final_wflow <-
+  final_wflow %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.5, 1, by = 0.01))))
+
+final_wflow %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+```
+
+We can now choose the threshold based on what we need.
