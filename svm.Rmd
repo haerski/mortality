@@ -89,19 +89,19 @@ We now have our full dataset. Behold!
 skim(clients)
 ```
 
-# Logistic regression model 1 
+# RBF Support Vector Machine model 
 
 # Engine
 ```{r}
-reg_spec <-
-  logistic_reg() %>%
-  set_engine("glm") %>%
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
   set_mode("classification")
 ```
 
 # Recipe 
 ```{r}
-reg_recipe <- 
+svm_rbf_recipe <- 
   recipe(formula = adverse ~ ., data = clients) %>% 
   step_rm(client, zip3, ae_2020, actual_2020 ) %>%
   step_zv(all_predictors()) %>% # remove zero variance columns (in our case it will remove per collar)
@@ -110,104 +110,68 @@ reg_recipe <-
 
 # Workflow 
 ```{r}
-reg_workflow <- 
+svm_rbf_workflow <- 
   workflow() %>%
-  add_model(reg_spec) %>% 
-  add_recipe(reg_recipe)
+  add_model(svm_rbf_spec) %>% 
+  add_recipe(svm_rbf_recipe)
 ```
 
 # Feed data (train the model)
 ```{r}
 set.seed(4751)
-reg_split <- initial_split(clients, prop=0.8, strata= adverse) # it will split data in a way why keeping the proportion of adverse the same (splitting based on the outcome)
+svm_rbf_split <- initial_split(clients, prop=0.8, strata= adverse) # it will split data in a way why keeping the proportion of adverse the same (splitting based on the outcome)
 
 # here it directly split then use test and find accuracy, get summary results using collect_metrics
-reg_fit <- reg_workflow %>%
-  last_fit(reg_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
+svm_rbf_fit <- svm_rbf_workflow %>%
+  last_fit(svm_rbf_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
 ```
 
 # Getting results 
 ```{r}
-reg_fit %>% 
+svm_rbf_fit %>% 
   collect_metrics()
 ```
 
-# Penalized logistic regression Model 2 
+# Polynomial Support Vector Machine model 
+
+# Engine
 ```{r}
-reg_2_spec <-
-  logistic_reg(penalty = tune()) %>%
-  set_engine("glmnet") %>%
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
   set_mode("classification")
-reg_2_spec %>% 
-  translate() 
-mixture()
 ```
 
+# Recipe 
 ```{r}
-reg_2_workflow <- 
+svm_poly_recipe <- 
+  recipe(formula = adverse ~ ., data = clients) %>% 
+  step_rm(client, zip3, ae_2020, actual_2020 ) %>%
+  step_zv(all_predictors()) %>% # remove zero variance columns (in our case it will remove per collar)
+  step_normalize(all_predictors(), -all_nominal()) 
+```
+
+# Workflow 
+```{r}
+svm_poly_workflow <- 
   workflow() %>%
-  add_model(reg_2_spec) %>% 
-  add_recipe(reg_recipe)
+  add_model(svm_poly_spec) %>% 
+  add_recipe(svm_poly_recipe)
 ```
 
-# we need to choose the penalty (furter split training into training and validation or do cross validation )
+# Feed data (train the model)
 ```{r}
-reg_val <- validation_split(training(reg_split))
-reg_val
+set.seed(4751)
+svm_poly_split <- initial_split(clients, prop=0.8, strata= adverse) # it will split data in a way why keeping the proportion of adverse the same (splitting based on the outcome)
+
+# here it directly split then use test and find accuracy, get summary results using collect_metrics
+svm_poly_fit <- svm_poly_workflow %>%
+  last_fit(svm_poly_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
 ```
 
-# Now we want to tune
+# Getting results 
 ```{r}
-reg_penalty <- grid_regular(penalty(), levels=100)
-reg_2_tune <-
-  reg_2_workflow %>%
-  tune_grid(reg_val,
-            grid = reg_penalty,
-            metrics = metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
-reg_2_tune
-
-reg_2_tune %>%
-  collect_metrics() %>%
-  filter(.metric == "sens") %>%
-  ggplot(aes(x = penalty, y = mean)) + geom_line() + scale_x_log10() + geom_vline(xintercept = 0.00118)
-
-autoplot(reg_2_tune)
-```
-
-```{r}
-reg_2_tune %>%
+svm_poly_fit %>% 
   collect_metrics()
-
-reg_2_tune %>%
-  collect_metrics() %>%
-  filter(penalty <= 1e-2) %>%
-  filter(.metric == "sens") %>%
-  arrange(desc(mean))
-
 ```
 
-# We have found the best tuning parameter and now we have to use it
-```{r}
-reg_2_tuned_workflow <- reg_2_workflow %>% 
-  finalize_workflow(parameters=list(penalty=0.00118))
-
-reg_2_tuned_fit <- reg_2_tuned_workflow %>%
-  last_fit(reg_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
-```
-
-# Comparing the firts model with the penalysed model (with the best tuning paramter)
-```{r}
-collect_metrics(reg_2_tuned_fit)
-collect_metrics(reg_fit)
-```
-
-# For each of the client in our test set, let's have a look at the predicted target variable and the actual adverse variable.  
-```{r}
-reg_2_tuned_fit %>% 
-  collect_predictions()
-```
-
-```{r}
-reg_2_tuned_fit %>%
-  roc_curve()
-```
