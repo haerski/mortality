@@ -7,6 +7,7 @@ The goal of this documents is to compare some tuned and untuned models on a "bas
 ```r
 library(tidyverse)
 library(tidymodels)
+library(probably)
 library(themis)
 library(feather)
 library(magrittr)
@@ -255,135 +256,40 @@ fit_wflows <-
   workflow_map(fn = "fit_resamples",
                seed = 30332,
                resamples = crossval,
+               control = control_resamples(save_pred = TRUE),
                verbose = TRUE)
-```
-
-```
 ## i  1 of 16 resampling: normalized_log
-```
-
-```
-## ✔  1 of 16 resampling: normalized_log (4.5s)
-```
-
-```
+## ✔  1 of 16 resampling: normalized_log (3.6s)
 ## i  2 of 16 resampling: normalized_log_tuned
-```
-
-```
-## ✔  2 of 16 resampling: normalized_log_tuned (4.8s)
-```
-
-```
+## ✔  2 of 16 resampling: normalized_log_tuned (4s)
 ## i  3 of 16 resampling: normalized_forest
-```
-
-```
-## ✔  3 of 16 resampling: normalized_forest (5.8s)
-```
-
-```
+## ✔  3 of 16 resampling: normalized_forest (5s)
 ## i  4 of 16 resampling: normalized_forest_tuned
-```
-
-```
-## ✔  4 of 16 resampling: normalized_forest_tuned (6s)
-```
-
-```
+## ✔  4 of 16 resampling: normalized_forest_tuned (4.9s)
 ## i  5 of 16 resampling: normalized_neural
-```
-
-```
-## ✔  5 of 16 resampling: normalized_neural (4.6s)
-```
-
-```
+## ✔  5 of 16 resampling: normalized_neural (4s)
 ## i  6 of 16 resampling: normalized_svm_rbf
-```
-
-```
-## ✔  6 of 16 resampling: normalized_svm_rbf (4.7s)
-```
-
-```
+## ✔  6 of 16 resampling: normalized_svm_rbf (4.2s)
 ## i  7 of 16 resampling: normalized_svm_poly
-```
-
-```
-## ✔  7 of 16 resampling: normalized_svm_poly (4.9s)
-```
-
-```
+## ✔  7 of 16 resampling: normalized_svm_poly (4.3s)
 ## i  8 of 16 resampling: normalized_knn_spec
-```
-
-```
-## ✔  8 of 16 resampling: normalized_knn_spec (4.6s)
-```
-
-```
+## ✔  8 of 16 resampling: normalized_knn_spec (4s)
 ## i  9 of 16 resampling: basic_log
-```
-
-```
-## ✔  9 of 16 resampling: basic_log (4.1s)
-```
-
-```
+## ✔  9 of 16 resampling: basic_log (3.9s)
 ## i 10 of 16 resampling: basic_log_tuned
-```
-
-```
-## ✔ 10 of 16 resampling: basic_log_tuned (4.5s)
-```
-
-```
+## ✔ 10 of 16 resampling: basic_log_tuned (3.7s)
 ## i 11 of 16 resampling: basic_forest
-```
-
-```
-## ✔ 11 of 16 resampling: basic_forest (5.5s)
-```
-
-```
+## ✔ 11 of 16 resampling: basic_forest (4.6s)
 ## i 12 of 16 resampling: basic_forest_tuned
-```
-
-```
-## ✔ 12 of 16 resampling: basic_forest_tuned (5.7s)
-```
-
-```
+## ✔ 12 of 16 resampling: basic_forest_tuned (5.2s)
 ## i 13 of 16 resampling: basic_neural
-```
-
-```
-## ✔ 13 of 16 resampling: basic_neural (4.2s)
-```
-
-```
+## ✔ 13 of 16 resampling: basic_neural (3.7s)
 ## i 14 of 16 resampling: basic_svm_rbf
-```
-
-```
-## ✔ 14 of 16 resampling: basic_svm_rbf (5.2s)
-```
-
-```
+## ✔ 14 of 16 resampling: basic_svm_rbf (4.1s)
 ## i 15 of 16 resampling: basic_svm_poly
-```
-
-```
-## ✔ 15 of 16 resampling: basic_svm_poly (5.4s)
-```
-
-```
+## ✔ 15 of 16 resampling: basic_svm_poly (4.9s)
 ## i 16 of 16 resampling: basic_knn_spec
-```
-
-```
-## ✔ 16 of 16 resampling: basic_knn_spec (4.5s)
+## ✔ 16 of 16 resampling: basic_knn_spec (3.9s)
 ```
 
 Comparing our metrics for the models (unfortunately I couldn't figure out how to show which recipe was picked...)
@@ -445,3 +351,35 @@ fit_wflows %>% rank_results("roc_auc") %>% select(wflow_id) %>% unique()
 ## 16 basic_neural
 ```
 
+We will pick `basic_forest` as the "final" model.
+
+```r
+final_wflow <-
+  fit_wflows %>%
+  pull_workflow_set_result("basic_forest")
+```
+
+Right now, given a test case, tries to find the probability that `ae > 3`. If that number is greater than 0.5, the model predicts `ae > 3`, if not, the model predicts `ae < 3`. This threshold of 0.5 can be changed, which will affect specificity and sensitivity. For the 10 models coming from the 10-fold CV, we compute specificity and sensitivity for all threshold in `seq(0.5, 1, 0.01)`, that is a grid from 0.5 to 1 with step of 0.01. We then average the estimate for the 10 models to get the following plot (could have also drawn error bars...)
+
+```r
+final_wflow <-
+  final_wflow %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.5, 1, by = 0.01))))
+
+final_wflow %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+```
+
+```
+## `summarise()` has grouped output by '.threshold'. You can override using the `.groups` argument.
+```
+
+![plot of chunk choosing_bin_threshold](figure/choosing_bin_threshold-1.png)
+
+We can now choose the threshold based on what we need.
