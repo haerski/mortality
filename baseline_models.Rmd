@@ -146,15 +146,15 @@ knn_spec <-
   set_mode("classification")
 
 models <- list(log = log_spec,
-               log_tuned = tuned_log_spec,
+               logtuned = tuned_log_spec,
                forest = forest_spec,
-               forest_tuned = tuned_forest_spec,
+               foresttuned = tuned_forest_spec,
                neural = sln_spec,
-               svm_rbf = svm_rbf_spec,
-               svm_poly = svm_poly_spec,
-               knn_spec = knn_spec)
-recipes <- list("with_2019_ae" = with2019_rec,
-                "no_2019_ae" = no2019_rec)
+               svmrbf = svm_rbf_spec,
+               svmpoly = svm_poly_spec,
+               knnspec = knn_spec)
+recipes <- list("with2019ae" = with2019_rec,
+                "no2019ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
 ```
 
@@ -185,28 +185,28 @@ autoplot(fit_wflows)
 fit_wflows %>% collect_metrics()
 ```
 
-```{r}
+This graph now shows which recipe was picked
+```{r ae2019_improvement}
 fit_wflows %>%
   collect_metrics() %>%
-  mutate(with = str_detect(wflow_id, "with")) %>%
-  ggplot(aes(x = model, y = mean, shape = with)) +
-  geom_line() +
-  facet_wrap(~ .metric)
+  separate(wflow_id, into = c("rec", "mod"), sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = rec, y = mean, color = mod, group = mod)) +
+  geom_point() + geom_line() + facet_wrap(~ factor(.metric))
 ```
 
-
-Looks like there is no downside to normalizing. Perhaps it should be the default? Also looks like the machine learning models (svn and neural net) could benefit from some tuning.
+Looks like adding the 2019 AE didn't help much! This is evidence for our hypothesis (AE 2019 doesn't hhave much effect on the final outcome).
+It's also possible that the machine learning models (svn and neural net) could benefit from some tuning.
 
 Here are the models ranked by `roc_auc`
 ```{r}
 fit_wflows %>% rank_results("roc_auc") %>% select(wflow_id) %>% unique()
 ```
 
-We will pick `basic_forest` as the "final" model.
+We will pick `no2019ae_forest` as the "final" model.
 ```{r}
 final_wflow <-
   fit_wflows %>%
-  pull_workflow_set_result("basic_forest")
+  pull_workflow_set_result("no2019ae_forest")
 ```
 
 Right now, given a test case, tries to find the probability that `ae > 3`. If that number is greater than 0.5, the model predicts `ae > 3`, if not, the model predicts `ae < 3`. This threshold of 0.5 can be changed, which will affect specificity and sensitivity. For the 10 models coming from the 10-fold CV, we compute specificity and sensitivity for all threshold in `seq(0.5, 1, 0.01)`, that is a grid from 0.5 to 1 with step of 0.01. We then average the estimate for the 10 models to get the following plot (could have also drawn error bars...)
@@ -225,16 +225,11 @@ final_wflow %>%
   ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
 ```
 
-We can now choose the threshold based on what we need.
+We can now choose the threshold based on what we need. (what do we need?)
 
 
 ## Tuning some models
-```{r}
-centered_rec <-
-  recipe(adverse ~ ., data = clients) %>%
-  step_zv(all_predictors()) %>%
-  step_normalize(all_predictors(), -all_nominal())
-
+```{r collapse = TRUE}
 tune_log_spec <-
   logistic_reg(penalty = tune()) %>%
   set_engine("glmnet") %>%
@@ -265,9 +260,11 @@ models <- list(log = tune_log_spec,
                forest = tune_forest_spec,
                sln = tune_sln_spec,
                svm = tune_svm_rbf_spec)
-recipes <- list("normalized" = centered_rec)
+recipes <- list(no2019_rec)
 wflows <- workflow_set(recipes, models)
 
+# make a bigger grid!
+# or use something like finetune!
 results <-
   wflows %>%
   workflow_map(resamples = crossval,
@@ -279,10 +276,13 @@ results <-
 
 autoplot(results)
 ```
+
+As a example, let's look at the results for the svm.
+We won't touch the prediction thresholds here.
 ```{r}
 tuned_svm <-
   results %>%
-  pull_workflow_set_result("normalized_svm")
+  pull_workflow_set_result("recipe_svm")
 
 
 best_svm <-
@@ -291,7 +291,7 @@ best_svm <-
 
 last_svm <-
   results %>%
-  pull_workflow("normalized_svm") %>%
+  pull_workflow("recipe_svm") %>%
   finalize_workflow(best_svm) %>%
   last_fit(init,
            metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv))
