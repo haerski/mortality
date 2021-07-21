@@ -9,6 +9,7 @@ library(tidymodels)
 library(feather)
 library(magrittr)
 library(skimr)
+library(vip)
 per <- read_feather("data/simulation_data/all_persons.feather")
 ```
 
@@ -24,7 +25,7 @@ clients <-
     avg_qx = mean(qx),
     avg_age = mean(Age),
     per_male = sum(Sex == "Male") / size,
-    per_blue_collar = sum(collar == "Blue") / size,
+    per_blue_collar = sum(collar == "blue") / size,
     expected = sum(qx * FaceAmt),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
@@ -43,25 +44,20 @@ zip_data <-
     AREALAND = NULL,
     AREA = NULL,
     HU = NULL,
-    `Percent adults fully vaccinated against COVID-19 (as of 6/10/21)` = NULL,
+    vaccinated = NULL,
     per_lib = NULL,
     per_green = NULL,
     per_other = NULL,
     per_rep = NULL,
-    Unemployment_rate_2020 = NULL,
-    PCTPOVALL_2019 = NULL,
-    `Deaths involving COVID-19` = NULL,
-    `Deaths from All Causes` = NULL
+    unempl_2020 = NULL,
+    poverty = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
   ) %>%
   rename(
-    nohs = `less than high school`,
-    hs = `high school`,
-    unemp = Unemployment_rate_2019,
-    hes = `Estimated hesitant`,
-    hes_uns = `Estimated hesitant or unsure`,
-    str_hes = `Estimated strongly hesitant`,
-    svi = `Social Vulnerability Index (SVI)`,
-    cvac = `CVAC level of concern for vaccination rollout`,
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
     income = Median_Household_Income_2019
   )
 zip_data
@@ -81,11 +77,13 @@ ZIP3 | Area       |
 732  | Not in use |
 872  | Not in use |
 004  | Not in use |
+202  | Washington DC, Government 1 |
 
-We ignore clients with these zip codes.
+We ignore clients with these zip codes. There are also two clients in DC for which we're missing election data. We will ignore those as well.
 ```{r}
 clients %<>%
-  inner_join(zip_data, by = "zip3")
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
 ```
 
 We now have our full dataset. Behold!
@@ -96,7 +94,7 @@ skim(clients)
 ## First model
 We will use a random forest using the tidymodels framework.
 
-We start by creating a recipe. We won't use zip3, client ID, actual claims, or ae_2020 as predictors.
+We start by creating a recipe. We won't use zip3, client ID, actual claims, or ae_2020 as predictors. Also, we don't have election data on DC, so we remove those.
 ```{r}
 ranger_recipe <-
   recipe(adverse ~ ., data = clients) %>%
@@ -105,11 +103,11 @@ ranger_recipe <-
 ```
 
 We use the ranger engine for our random forest. We could tune the paramters as well
-```{r eval=FALSE}
+```{r}
 ranger_spec <-
   rand_forest(trees = 1000) %>%
   set_mode("classification") %>%
-  set_engine("ranger")
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
 ```
 
 Wrap the recipe and model into a workflow
@@ -122,6 +120,7 @@ ranger_workflow <-
 
 Create an initial test-train split
 ```{r}
+set.seed(1111)
 init_split <-
   clients %>%
   initial_split(strata = adverse)
@@ -149,9 +148,10 @@ predictions <-
 Compute the confusion matrix
 ```{r}
 predictions %>%
-  bind_cols(clients_test %>% select(adverse)) %>%
+  bind_cols(clients_test %>% filter(!is.na(per_dem)) %>% select(adverse)) %>%
   conf_mat(adverse, .pred_class)
 ```
+
 It looks like the the model performs well, but it's basically predicting that all companies will have adverse deaths.
 
 This is another way to automate computation of metrics
@@ -177,13 +177,13 @@ ranger_last_fit %>%
 We will make train the model for more adverse outcomes by using *subsampling*. See e.g. [here](https://www.tidymodels.org/learn/models/sub-sampling/) for a nice introduction.
 ```{r}
 library(themis)
+set.seed(222)
 subsample_recipe <-
   ranger_recipe %>%
   step_rose(adverse)
 subsample_workflow <-
   ranger_workflow %>%
   update_recipe(subsample_recipe)
-
 subsample_last_fit <-
   subsample_workflow %>%
   last_fit(
@@ -207,6 +207,7 @@ With this dataset, an AE > 1.1 is too low; there are too few clients with low AE
 ```{r}
 clients$ae_2020 %>% summary()
 ```
+
 Let's say that a client experiences adverse deaths if AE > 3, which is about the 1st quartile
 ```{r}
 clients %<>%
@@ -215,6 +216,7 @@ clients %<>%
 
 We can apply the same workflow as before
 ```{r}
+set.seed(333)
 new_split <-
   clients %>%
   initial_split()
@@ -233,10 +235,11 @@ ranger_last_fit %>%
   roc_curve(adverse, .pred_FALSE) %>%
   autoplot()
 ```
+
 Better!
 
 Can we tune hyperparameters to get even better results? Let's check
-```{r}
+```{r message = FALSE, warning = FALSE}
 tune_spec <-
   ranger_spec %>%
   update(mtry = tune(), min_n = tune())
@@ -245,30 +248,31 @@ tune_workflow <-
   ranger_workflow %>%
   update_model(tune_spec)
 
+set.seed(444)
 tune_split <- initial_split(clients)
+set.seed(555)
 tune_resamples <-
   vfold_cv(training(tune_split))
 
 param_grid <-
-  tune_workflow %>%
-  parameters() %>%
-  finalize(training(tune_split)) %>%
-  grid_regular(levels = 5)
+  grid_regular(mtry(c(1, 23)),
+               min_n(),
+               levels = 5)
 
 tune_res <-
   tune_workflow %>%
   tune_grid(
     resamples = tune_resamples,
     grid = param_grid,
-    metrics = metric_set(sens, spec, roc_auc, j_index)
+    metrics = metric_set(sens, spec, roc_auc, j_index, accuracy)
   )
 
 autoplot(tune_res)
 ```
 
-For me, the best is mtry = 14, min_n = 11.
+I chose mtry = 12, min_n = 21.
 ```{r}
-best <- tibble(mtry = 14, min_n = 11)
+best <- tibble(mtry = 12, min_n = 21)
 final_wf <-
   tune_workflow %>%
   finalize_workflow(best)
@@ -277,10 +281,29 @@ final_wf_fit <-
   final_wf %>%
   last_fit(
     tune_split,
-    metrics = metric_set(sens, spec, roc_auc, j_index)
+    metrics = metric_set(sens, spec, roc_auc, j_index, accuracy)
     )
 
 final_wf_fit %>%
   collect_metrics()
+
+final_wf_fit %>%
+  collect_predictions() %>%
+  roc_curve(adverse, .pred_FALSE) %>%
+  autoplot()
+
+final_wf_fit %>%
+  collect_predictions() %>%
+  conf_mat(adverse, .pred_class)
 ```
 Cool stuff. How does this compare to logistic regression by month???
+
+We can also check variable importance
+```{r}
+final_wf_fit %>%
+  pluck(".workflow", 1) %>%
+  pull_workflow_fit() %>%
+  vip(num_features = 30)
+```
+
+Looks like population is the overwhelming winner. Next unemployment percentage, non-highschool graduate percentage and population density.

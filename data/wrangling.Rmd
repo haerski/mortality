@@ -31,34 +31,46 @@ rename
 population <- population %>%
               rename(FIPS = FIPStxt,
                      Population = POP_ESTIMATE_2019,
-                     R_Birth = R_birth_2019,
+                     R_birth = R_birth_2019,
                      R_death = R_death_2019)
 
 education <- education %>%
   rename(FIPS = `FIPS Code`,
-         `less than high school` = `Percent of adults with less than a high school diploma, 2015-19`,
-         `high school` = `Percent of adults with a high school diploma only, 2015-19`,
-         `college` = `Percent of adults completing some college or associate's degree, 2015-19`,
-         `bachelor` = `Percent of adults with a bachelor's degree or higher, 2015-19`)
+         nohs = `Percent of adults with less than a high school diploma, 2015-19`,
+         hs = `Percent of adults with a high school diploma only, 2015-19`,
+         college = `Percent of adults completing some college or associate's degree, 2015-19`,
+         bachelor = `Percent of adults with a bachelor's degree or higher, 2015-19`)
 
 hesitancy <- hesitancy %>%
-  rename(FIPS = `FIPS Code`)
+  rename(FIPS = `FIPS Code`,
+         hes = `Estimated hesitant`,
+         hes_unsure = `Estimated hesitant or unsure`,
+         strong_hes = `Estimated strongly hesitant`,
+         svi = `Social Vulnerability Index (SVI)`,
+         cvac = `CVAC level of concern for vaccination rollout`,
+         vaccinated = `Percent adults fully vaccinated against COVID-19 (as of 6/10/21)`)
+
 
 vaccine <- vaccine %>%
   rename(seriescomplete = Series_Complete_Yes,
          State = Recip_State)
 
 death <- death %>%
-  rename(FIPS = `FIPS County Code`)
+  rename(FIPS = `FIPS County Code`,
+         deaths_covid = `Deaths involving COVID-19`,
+         deaths_all = `Deaths from All Causes`)
 
 poverty <- poverty %>%
   rename(FIPS = FIPStxt,
-         State = Stabr)
+         State = Stabr,
+         poverty = PCTPOVALL_2019)
 
 unemployment <- unemployment %>%
-  rename(FIPS = FIPS_Code)
+  rename(FIPS = FIPS_Code,
+         unempl_2019 = Unemployment_rate_2019,
+         unempl_2020 = Unemployment_rate_2020)
 
-election <-election%>%
+election <- election%>%
   rename(FIPS = county_fips)
 ```
 
@@ -139,12 +151,12 @@ hesitancy <- hesitancy %>%
 education <- education %>%
   mutate(FIPS = str_pad(as.character(FIPS), 5, pad = "0"))
 
-election<-election%>%
-  select(FIPS, party, candidatevotes,totalvotes)%>%
-  group_by(FIPS,party)%>%
-  summarise(candidatevotes=sum(candidatevotes),totalvotes= totalvotes)%>%
-  distinct()%>%
-  pivot_wider(names_from = party,values_from =candidatevotes)%>%
+election <- election %>%
+  select(FIPS, party, candidatevotes,totalvotes) %>%
+  group_by(FIPS, party) %>%
+  summarise(candidatevotes = sum(candidatevotes), totalvotes = totalvotes) %>%
+  distinct() %>%
+  pivot_wider(names_from = party,values_from = candidatevotes) %>%
   summarise(per_dem = DEMOCRAT/totalvotes,per_rep=REPUBLICAN/totalvotes,per_other=OTHER/totalvotes,per_green=GREEN/totalvotes,per_lib=LIBERTARIAN/totalvotes) %>%
   mutate(FIPS = str_pad(as.character(FIPS), 5, pad = "0"))
 ```
@@ -152,12 +164,12 @@ election<-election%>%
 Combine together, education has the most counties. There will be lots of NANs!!
 ```{r}
 data <- education %>%
-  left_join(population, by = "FIPS") %>%
-  left_join(unemployment, by = "FIPS") %>%
-  left_join(poverty, by = "FIPS") %>%
-  left_join(death, by = "FIPS") %>%
-  left_join(election, by = "FIPS") %>%
-  left_join(hesitancy, by = "FIPS")
+  full_join(population, by = "FIPS") %>%
+  full_join(unemployment, by = "FIPS") %>%
+  full_join(poverty, by = "FIPS") %>%
+  full_join(death, by = "FIPS") %>%
+  full_join(election, by = "FIPS") %>%
+  full_join(hesitancy, by = "FIPS")
 ```
 
 Change FIPS to zip3
@@ -177,7 +189,9 @@ cleandata <- data %>%
 head(cleandata)
 ```
 
-Clean up and aggregate by zip3. We take the weighted average of variables. Every variable will be weighted by population except household income, which will be weighted by number of households. We also remove Puerto Rico and Virgin Islands. N/A values will be ignored in our weighting.
+Clean up and aggregate by zip3. We take the weighted average of variables. Every variable will be weighted by population except household income, which will be weighted by number of households. N/A values will be ignored in our weighting.
+
+We also remove Puerto Rico and Virgin Islands, two zipcodes from Texas (one is a mall, one is a hospital), and two government-reserved zip-codes.
 ```{r}
 modifydata <- cleandata %>%
   inner_join(zip3_rel, by = c("state", "county")) %>%
@@ -185,13 +199,13 @@ modifydata <- cleandata %>%
   relocate(Median_Household_Income_2019, .before = zip3) %>%
   mutate(Population = NULL) %>%
   summarize(
-            across(`less than high school`:`Percent adults fully vaccinated against COVID-19 (as of 6/10/21).y`, ~ sum(.x * POPPT / sum(POPPT, na.rm = TRUE), na.rm = TRUE)),
-            Median_Household_Income_2019 = sum(Median_Household_Income_2019 * HUPT / sum(HUPT, na.rm = TRUE), na.rm = TRUE),
+            across(nohs:vaccinated, ~ weighted.mean(.x, POPPT, na.rm = TRUE)),
+            Median_Household_Income_2019 = weighted.mean(Median_Household_Income_2019, HUPT, na.rm = TRUE),
             POP = sum(POPPT),
             HU = sum(HUPT),
             AREA = sum(AREAPT),
             AREALAND = sum(AREALANDPT)) %>%
-  filter(!zip3 %in% c("006", "007", "009"))
+  filter(!zip3 %in% c("006", "007", "009", "202", "204", "753", "772"))
 ```
 
 

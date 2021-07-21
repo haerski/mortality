@@ -75,9 +75,8 @@ exp
 
 other_data <-
   read_feather("data/data.feather") %>%
-  select(zip3, POP, AREALAND, `Deaths involving COVID-19`, per_dem, `Social Vulnerability Index (SVI)`, `CVAC level of concern for vaccination rollout`) %>%
-  rename(covid_deaths = `Deaths involving COVID-19`, svi = `Social Vulnerability Index (SVI)`, cvac = `CVAC level of concern for vaccination rollout`) %>%
-  mutate(density = POP / AREALAND, AREALAND = NULL)
+  select(zip3, POP, AREALAND, deaths_covid, per_dem, svi, cvac) %>%
+  rename(covid_deaths = deaths_covid, AREALAND = NULL)
 
 data <-
   exp %>%
@@ -103,7 +102,8 @@ data_train %>%
 client_rec <-
   recipe(Y ~ ., data = data_train) %>%
   update_role(client, new_role = "client ID") %>%
-  update_role(actual2020, actual2021, AE2020, AE2021, new_role = "future")
+  update_role(actual2020, actual2021, AE2020, AE2021, new_role = "future") %>%
+  step_naomit(POP, per_dem)
 
 summary(client_rec)
 
