@@ -31,6 +31,8 @@ clients <-
     expected = sum(qx * FaceAmt),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
     adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
   ) %>%
   relocate(adverse, ae_2020, .after = zip3) %>%
@@ -96,18 +98,18 @@ We'll evaluate models using a workflow set. To make our life easier, we will rem
 ```{r}
 clients <-
   clients %>%
-  select(-client, -zip3, -ae_2020, -actual_2020)
+  select(-client, -zip3, -ae_2020, -actual_2020, -actual_2019)
 ```
 
 We now gather our recipes and models.
 ```{r}
-centered_rec <-
+with2019_rec <-
   recipe(adverse ~ ., data = clients) %>%
   step_zv(all_predictors()) %>%
   step_normalize(all_predictors(), -all_nominal())
-basic_rec <-
-  recipe(adverse ~ ., data = clients) %>%
-  step_zv(all_predictors())
+no2019_rec <-
+  with2019_rec %>%
+  step_rm(ae_2019)
 
 log_spec <-
   logistic_reg() %>%
@@ -151,8 +153,8 @@ models <- list(log = log_spec,
                svm_rbf = svm_rbf_spec,
                svm_poly = svm_poly_spec,
                knn_spec = knn_spec)
-recipes <- list("normalized" = centered_rec,
-                "basic" = basic_rec)
+recipes <- list("with_2019_ae" = with2019_rec,
+                "no_2019_ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
 ```
 
@@ -172,14 +174,26 @@ fit_wflows <-
                seed = 30332,
                resamples = crossval,
                control = control_resamples(save_pred = TRUE),
+               metrics = metric_set(roc_auc, sens, accuracy),
                verbose = TRUE)
 ```
 
 Comparing our metrics for the models (unfortunately I couldn't figure out how to show which recipe was picked...)
 ```{r rank_baseline_models}
 autoplot(fit_wflows, metric = "roc_auc")
+autoplot(fit_wflows)
 fit_wflows %>% collect_metrics()
 ```
+
+```{r}
+fit_wflows %>%
+  collect_metrics() %>%
+  mutate(with = str_detect(wflow_id, "with")) %>%
+  ggplot(aes(x = model, y = mean, shape = with)) +
+  geom_line() +
+  facet_wrap(~ .metric)
+```
+
 
 Looks like there is no downside to normalizing. Perhaps it should be the default? Also looks like the machine learning models (svn and neural net) could benefit from some tuning.
 
@@ -212,3 +226,79 @@ final_wflow %>%
 ```
 
 We can now choose the threshold based on what we need.
+
+
+## Tuning some models
+```{r}
+centered_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors(), -all_nominal())
+
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+# tune_svm_poly_spec <-
+#   svm_poly() %>%
+#   set_engine("kernlab") %>%
+#   set_mode("classification")
+# tune_knn_spec <-
+#   nearest_neighbor() %>%
+#   set_engine("kknn") %>%
+#   set_mode("classification")
+
+models <- list(log = tune_log_spec,
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec)
+recipes <- list("normalized" = centered_rec)
+wflows <- workflow_set(recipes, models)
+
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+
+autoplot(results)
+```
+```{r}
+tuned_svm <-
+  results %>%
+  pull_workflow_set_result("normalized_svm")
+
+
+best_svm <-
+  tuned_svm %>%
+  select_best(metric = "roc_auc")
+
+last_svm <-
+  results %>%
+  pull_workflow("normalized_svm") %>%
+  finalize_workflow(best_svm) %>%
+  last_fit(init,
+           metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv))
+
+last_svm %>%
+  collect_metrics()
+
+```
+
+
