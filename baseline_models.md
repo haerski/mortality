@@ -33,6 +33,8 @@ clients <-
     expected = sum(qx * FaceAmt),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
     adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
   ) %>%
   relocate(adverse, ae_2020, .after = zip3) %>%
@@ -116,12 +118,12 @@ Table: Data summary
 |:------------------------|:-------|
 |Name                     |clients |
 |Number of rows           |492     |
-|Number of columns        |29      |
+|Number of columns        |31      |
 |_______________________  |        |
 |Column type frequency:   |        |
 |character                |2       |
 |factor                   |1       |
-|numeric                  |26      |
+|numeric                  |28      |
 |________________________ |        |
 |Group variables          |None    |
 
@@ -154,6 +156,8 @@ Table: Data summary
 |per_blue_collar |         0|             1|         1.00|         0.00|       1.00|         1.00|         1.00|         1.00| 1.000000e+00|▁▁▇▁▁ |
 |expected        |         0|             1|   1076643.68|   1056824.25|   11604.50|    350329.91|    831644.68|   1439648.44| 1.189955e+07|▇▁▁▁▁ |
 |actual_2020     |         0|             1|  15432043.75|  44771997.48|       0.00|   1963387.50|   4525375.00|  13923600.00| 5.232112e+08|▇▁▁▁▁ |
+|actual_2019     |         0|             1|   1088745.83|   1251334.51|       0.00|    224218.75|    674962.50|   1605662.50| 1.378420e+07|▇▁▁▁▁ |
+|ae_2019         |         0|             1|         0.97|         0.80|       0.00|         0.47|         0.84|         1.28| 6.290000e+00|▇▂▁▁▁ |
 |nohs            |         0|             1|        11.20|         3.75|       4.00|         8.44|        10.78|        12.90| 2.165000e+01|▂▇▅▁▂ |
 |hs              |         0|             1|        23.75|         7.02|      12.10|        18.90|        23.10|        27.50| 4.680000e+01|▅▇▅▂▁ |
 |college         |         0|             1|        28.45|         4.83|      13.50|        25.60|        28.58|        31.56| 3.980000e+01|▁▃▇▆▂ |
@@ -178,19 +182,19 @@ We'll evaluate models using a workflow set. To make our life easier, we will rem
 ```r
 clients <-
   clients %>%
-  select(-client, -zip3, -ae_2020, -actual_2020)
+  select(-client, -zip3, -ae_2020, -actual_2020, -actual_2019)
 ```
 
 We now gather our recipes and models.
 
 ```r
-centered_rec <-
+with2019_rec <-
   recipe(adverse ~ ., data = clients) %>%
   step_zv(all_predictors()) %>%
   step_normalize(all_predictors(), -all_nominal())
-basic_rec <-
-  recipe(adverse ~ ., data = clients) %>%
-  step_zv(all_predictors())
+no2019_rec <-
+  with2019_rec %>%
+  step_rm(ae_2019)
 
 log_spec <-
   logistic_reg() %>%
@@ -227,15 +231,15 @@ knn_spec <-
   set_mode("classification")
 
 models <- list(log = log_spec,
-               log_tuned = tuned_log_spec,
+               logtuned = tuned_log_spec,
                forest = forest_spec,
-               forest_tuned = tuned_forest_spec,
+               foresttuned = tuned_forest_spec,
                neural = sln_spec,
-               svm_rbf = svm_rbf_spec,
-               svm_poly = svm_poly_spec,
-               knn_spec = knn_spec)
-recipes <- list("normalized" = centered_rec,
-                "basic" = basic_rec)
+               svmrbf = svm_rbf_spec,
+               svmpoly = svm_poly_spec,
+               knnspec = knn_spec)
+recipes <- list("with2019ae" = with2019_rec,
+                "no2019ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
 ```
 
@@ -257,39 +261,40 @@ fit_wflows <-
                seed = 30332,
                resamples = crossval,
                control = control_resamples(save_pred = TRUE),
+               metrics = metric_set(roc_auc, sens, accuracy),
                verbose = TRUE)
-## i  1 of 16 resampling: normalized_log
-## ✔  1 of 16 resampling: normalized_log (3.6s)
-## i  2 of 16 resampling: normalized_log_tuned
-## ✔  2 of 16 resampling: normalized_log_tuned (4s)
-## i  3 of 16 resampling: normalized_forest
-## ✔  3 of 16 resampling: normalized_forest (5s)
-## i  4 of 16 resampling: normalized_forest_tuned
-## ✔  4 of 16 resampling: normalized_forest_tuned (4.9s)
-## i  5 of 16 resampling: normalized_neural
-## ✔  5 of 16 resampling: normalized_neural (4s)
-## i  6 of 16 resampling: normalized_svm_rbf
-## ✔  6 of 16 resampling: normalized_svm_rbf (4.2s)
-## i  7 of 16 resampling: normalized_svm_poly
-## ✔  7 of 16 resampling: normalized_svm_poly (4.3s)
-## i  8 of 16 resampling: normalized_knn_spec
-## ✔  8 of 16 resampling: normalized_knn_spec (4s)
-## i  9 of 16 resampling: basic_log
-## ✔  9 of 16 resampling: basic_log (3.9s)
-## i 10 of 16 resampling: basic_log_tuned
-## ✔ 10 of 16 resampling: basic_log_tuned (3.7s)
-## i 11 of 16 resampling: basic_forest
-## ✔ 11 of 16 resampling: basic_forest (4.6s)
-## i 12 of 16 resampling: basic_forest_tuned
-## ✔ 12 of 16 resampling: basic_forest_tuned (5.2s)
-## i 13 of 16 resampling: basic_neural
-## ✔ 13 of 16 resampling: basic_neural (3.7s)
-## i 14 of 16 resampling: basic_svm_rbf
-## ✔ 14 of 16 resampling: basic_svm_rbf (4.1s)
-## i 15 of 16 resampling: basic_svm_poly
-## ✔ 15 of 16 resampling: basic_svm_poly (4.9s)
-## i 16 of 16 resampling: basic_knn_spec
-## ✔ 16 of 16 resampling: basic_knn_spec (3.9s)
+## i  1 of 16 resampling: with2019ae_log
+## ✔  1 of 16 resampling: with2019ae_log (3.9s)
+## i  2 of 16 resampling: with2019ae_logtuned
+## ✔  2 of 16 resampling: with2019ae_logtuned (4s)
+## i  3 of 16 resampling: with2019ae_forest
+## ✔  3 of 16 resampling: with2019ae_forest (5.5s)
+## i  4 of 16 resampling: with2019ae_foresttuned
+## ✔  4 of 16 resampling: with2019ae_foresttuned (5.1s)
+## i  5 of 16 resampling: with2019ae_neural
+## ✔  5 of 16 resampling: with2019ae_neural (4.1s)
+## i  6 of 16 resampling: with2019ae_svmrbf
+## ✔  6 of 16 resampling: with2019ae_svmrbf (4s)
+## i  7 of 16 resampling: with2019ae_svmpoly
+## ✔  7 of 16 resampling: with2019ae_svmpoly (4.2s)
+## i  8 of 16 resampling: with2019ae_knnspec
+## ✔  8 of 16 resampling: with2019ae_knnspec (3.9s)
+## i  9 of 16 resampling: no2019ae_log
+## ✔  9 of 16 resampling: no2019ae_log (4.1s)
+## i 10 of 16 resampling: no2019ae_logtuned
+## ✔ 10 of 16 resampling: no2019ae_logtuned (4.5s)
+## i 11 of 16 resampling: no2019ae_forest
+## ✔ 11 of 16 resampling: no2019ae_forest (5.6s)
+## i 12 of 16 resampling: no2019ae_foresttuned
+## ✔ 12 of 16 resampling: no2019ae_foresttuned (6s)
+## i 13 of 16 resampling: no2019ae_neural
+## ✔ 13 of 16 resampling: no2019ae_neural (4.4s)
+## i 14 of 16 resampling: no2019ae_svmrbf
+## ✔ 14 of 16 resampling: no2019ae_svmrbf (4.3s)
+## i 15 of 16 resampling: no2019ae_svmpoly
+## ✔ 15 of 16 resampling: no2019ae_svmpoly (4.6s)
+## i 16 of 16 resampling: no2019ae_knnspec
+## ✔ 16 of 16 resampling: no2019ae_knnspec (4.2s)
 ```
 
 Comparing our metrics for the models (unfortunately I couldn't figure out how to show which recipe was picked...)
@@ -301,27 +306,46 @@ autoplot(fit_wflows, metric = "roc_auc")
 ![plot of chunk rank_baseline_models](figure/rank_baseline_models-1.png)
 
 ```r
+autoplot(fit_wflows)
+```
+
+![plot of chunk rank_baseline_models](figure/rank_baseline_models-2.png)
+
+```r
 fit_wflows %>% collect_metrics()
 ```
 
 ```
-## # A tibble: 32 x 9
+## # A tibble: 48 x 9
 ##    wflow_id  .config  preproc model .metric .estimator  mean     n std_err
 ##    <chr>     <chr>    <chr>   <chr> <chr>   <chr>      <dbl> <int>   <dbl>
-##  1 normaliz… Preproc… recipe  logi… accura… binary     0.774    10  0.0131
-##  2 normaliz… Preproc… recipe  logi… roc_auc binary     0.722    10  0.0306
-##  3 normaliz… Preproc… recipe  logi… accura… binary     0.769    10  0.0142
-##  4 normaliz… Preproc… recipe  logi… roc_auc binary     0.738    10  0.0340
-##  5 normaliz… Preproc… recipe  rand… accura… binary     0.853    10  0.0163
-##  6 normaliz… Preproc… recipe  rand… roc_auc binary     0.876    10  0.0199
-##  7 normaliz… Preproc… recipe  rand… accura… binary     0.858    10  0.0172
-##  8 normaliz… Preproc… recipe  rand… roc_auc binary     0.867    10  0.0190
-##  9 normaliz… Preproc… recipe  mlp   accura… binary     0.731    10  0.0128
-## 10 normaliz… Preproc… recipe  mlp   roc_auc binary     0.695    10  0.0273
-## # … with 22 more rows
+##  1 with2019… Preproc… recipe  logi… accura… binary     0.769    10  0.0160
+##  2 with2019… Preproc… recipe  logi… roc_auc binary     0.718    10  0.0302
+##  3 with2019… Preproc… recipe  logi… sens    binary     0.905    10  0.0157
+##  4 with2019… Preproc… recipe  logi… accura… binary     0.769    10  0.0132
+##  5 with2019… Preproc… recipe  logi… roc_auc binary     0.731    10  0.0318
+##  6 with2019… Preproc… recipe  logi… sens    binary     0.916    10  0.0146
+##  7 with2019… Preproc… recipe  rand… accura… binary     0.845    10  0.0174
+##  8 with2019… Preproc… recipe  rand… roc_auc binary     0.877    10  0.0188
+##  9 with2019… Preproc… recipe  rand… sens    binary     0.953    10  0.0110
+## 10 with2019… Preproc… recipe  rand… accura… binary     0.858    10  0.0163
+## # … with 38 more rows
 ```
 
-Looks like there is no downside to normalizing. Perhaps it should be the default? Also looks like the machine learning models (svn and neural net) could benefit from some tuning.
+This graph now shows which recipe was picked
+
+```r
+fit_wflows %>%
+  collect_metrics() %>%
+  separate(wflow_id, into = c("rec", "mod"), sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = rec, y = mean, color = mod, group = mod)) +
+  geom_point() + geom_line() + facet_wrap(~ factor(.metric))
+```
+
+![plot of chunk ae2019_improvement](figure/ae2019_improvement-1.png)
+
+Looks like adding the 2019 AE didn't help much! This is evidence for our hypothesis (AE 2019 doesn't hhave much effect on the final outcome).
+It's also possible that the machine learning models (svn and neural net) could benefit from some tuning.
 
 Here are the models ranked by `roc_auc`
 
@@ -331,32 +355,32 @@ fit_wflows %>% rank_results("roc_auc") %>% select(wflow_id) %>% unique()
 
 ```
 ## # A tibble: 16 x 1
-##    wflow_id               
-##    <chr>                  
-##  1 basic_forest           
-##  2 normalized_forest      
-##  3 basic_forest_tuned     
-##  4 normalized_forest_tuned
-##  5 basic_svm_rbf          
-##  6 normalized_svm_rbf     
-##  7 basic_log_tuned        
-##  8 normalized_log_tuned   
-##  9 basic_knn_spec         
-## 10 normalized_knn_spec    
-## 11 normalized_log         
-## 12 basic_log              
-## 13 basic_svm_poly         
-## 14 normalized_svm_poly    
-## 15 normalized_neural      
-## 16 basic_neural
+##    wflow_id              
+##    <chr>                 
+##  1 with2019ae_forest     
+##  2 no2019ae_forest       
+##  3 no2019ae_foresttuned  
+##  4 with2019ae_foresttuned
+##  5 no2019ae_svmrbf       
+##  6 with2019ae_svmrbf     
+##  7 no2019ae_logtuned     
+##  8 with2019ae_logtuned   
+##  9 no2019ae_knnspec      
+## 10 no2019ae_log          
+## 11 with2019ae_log        
+## 12 with2019ae_neural     
+## 13 with2019ae_knnspec    
+## 14 no2019ae_svmpoly      
+## 15 with2019ae_svmpoly    
+## 16 no2019ae_neural
 ```
 
-We will pick `basic_forest` as the "final" model.
+We will pick `no2019ae_forest` as the "final" model.
 
 ```r
 final_wflow <-
   fit_wflows %>%
-  pull_workflow_set_result("basic_forest")
+  pull_workflow_set_result("no2019ae_forest")
 ```
 
 Right now, given a test case, tries to find the probability that `ae > 3`. If that number is greater than 0.5, the model predicts `ae > 3`, if not, the model predicts `ae < 3`. This threshold of 0.5 can be changed, which will affect specificity and sensitivity. For the 10 models coming from the 10-fold CV, we compute specificity and sensitivity for all threshold in `seq(0.5, 1, 0.01)`, that is a grid from 0.5 to 1 with step of 0.01. We then average the estimate for the 10 models to get the following plot (could have also drawn error bars...)
@@ -382,4 +406,105 @@ final_wflow %>%
 
 ![plot of chunk choosing_bin_threshold](figure/choosing_bin_threshold-1.png)
 
-We can now choose the threshold based on what we need.
+We can now choose the threshold based on what we need. (what do we need?)
+
+
+## Tuning some models
+
+```r
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+# tune_svm_poly_spec <-
+#   svm_poly() %>%
+#   set_engine("kernlab") %>%
+#   set_mode("classification")
+# tune_knn_spec <-
+#   nearest_neighbor() %>%
+#   set_engine("kknn") %>%
+#   set_mode("classification")
+
+models <- list(log = tune_log_spec,
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec)
+recipes <- list(no2019_rec)
+wflows <- workflow_set(recipes, models)
+
+# make a bigger grid!
+# or use something like finetune!
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+## i 1 of 4 tuning:     recipe_log
+## ✔ 1 of 4 tuning:     recipe_log (5.4s)
+## i 2 of 4 tuning:     recipe_forest
+## i Creating pre-processing data to finalize unknown parameter: mtry
+## ✔ 2 of 4 tuning:     recipe_forest (52.1s)
+## i 3 of 4 tuning:     recipe_sln
+## ✔ 3 of 4 tuning:     recipe_sln (46.4s)
+## i 4 of 4 tuning:     recipe_svm
+## ✔ 4 of 4 tuning:     recipe_svm (38.2s)
+
+autoplot(results)
+## Warning: Removed 10 rows containing missing values (geom_point).
+```
+
+![plot of chunk unnamed-chunk-13](figure/unnamed-chunk-13-1.png)
+
+As a example, let's look at the results for the svm.
+We won't touch the prediction thresholds here.
+
+```r
+tuned_svm <-
+  results %>%
+  pull_workflow_set_result("recipe_svm")
+
+
+best_svm <-
+  tuned_svm %>%
+  select_best(metric = "roc_auc")
+
+last_svm <-
+  results %>%
+  pull_workflow("recipe_svm") %>%
+  finalize_workflow(best_svm) %>%
+  last_fit(init,
+           metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv))
+
+last_svm %>%
+  collect_metrics()
+```
+
+```
+## # A tibble: 6 x 4
+##   .metric  .estimator .estimate .config             
+##   <chr>    <chr>          <dbl> <chr>               
+## 1 accuracy binary         0.790 Preprocessor1_Model1
+## 2 sens     binary         0.935 Preprocessor1_Model1
+## 3 spec     binary         0.375 Preprocessor1_Model1
+## 4 ppv      binary         0.811 Preprocessor1_Model1
+## 5 npv      binary         0.667 Preprocessor1_Model1
+## 6 roc_auc  binary         0.788 Preprocessor1_Model1
+```
+
+
