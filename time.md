@@ -186,3 +186,12 @@ weekly_data <-
   mutate(zip_deaths = replace_na(zip_deaths, 0))
 ```
 
+We add a rolling AE number. This will be the AE for the 13 week prior to that week.
+
+```r
+weekly_data %<>%
+  group_by(client) %>%
+  mutate(rolling_ae = slide_index_dbl(claims, yw, sum, .before = 13) / (first(expected) / 4)) %>%
+  relocate(rolling_ae, .before = size)
+```
+
