@@ -203,7 +203,7 @@ This graph now shows which recipe was picked
 fit_wflows %>%
   collect_metrics() %>%
   separate(wflow_id, into = c("rec", "mod"), sep = "_", remove = FALSE) %>%
-  ggplot(aes(x = rec, y = mean, color = mod, group = mod)) +
+  ggplot(aes(x = rec, y = mean, color = str_replace(mod,"tuned",""), linetype=str_detect(mod,"tuned"), group = mod)) +
   geom_point() + geom_line() + facet_wrap(~ factor(.metric))
 ```
 
