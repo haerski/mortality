@@ -211,4 +211,85 @@ final_wflow %>%
   ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
 ```
 
-We can now choose the threshold based on what we need.
+We can now choose the threshold based on what we need. (what do we need?)
+
+
+## Tuning some models
+```{r collapse = TRUE}
+tune_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  step_zv(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_normalize(all_predictors())
+
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+tune_svm_poly_spec <-
+  svm_poly(cost = tune(), degree = tune(), scale_factor = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+tune_knn_spec <-
+  nearest_neighbor(neighbors = tune(), weight_func = tune(), dist_power = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+models <- list(log = tune_log_spec,
+# models <- list(
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec,
+               svmpoly = tune_svm_poly_spec,
+               knn = tune_knn_spec)
+recipes <- list(tune = tune_rec)
+wflows <- workflow_set(recipes, models)
+
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 100,
+               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+
+autoplot(results)
+```
+
+As a example, let's look at the results for the svm.
+We won't touch the prediction thresholds here.
+```{r}
+tuned_svm <-
+  results %>%
+  pull_workflow_set_result("recipe_svm")
+
+
+best_svm <-
+  tuned_svm %>%
+  select_best(metric = "roc_auc")
+
+last_svm <-
+  results %>%
+  pull_workflow("recipe_svm") %>%
+  finalize_workflow(best_svm) %>%
+  last_fit(init,
+           metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv))
+
+last_svm %>%
+  collect_metrics()
+```
