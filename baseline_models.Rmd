@@ -12,6 +12,7 @@ library(feather)
 library(magrittr)
 library(skimr)
 library(vip)
+library(finetune)
 per <- read_feather("data/simulation_data/all_persons.feather")
 ```
 
@@ -301,4 +302,50 @@ last_svm %>%
 
 ```
 
+## SVM RBF
+I'm kind of curious about what can be done with the SVM.
+We will go with the [recommended preprocessing steps from TMWR](https://www.tmwr.org/pre-proc-table.html).
 
+```{r collapse = TRUE}
+svm_recipe <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  step_zv(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_normalize(all_predictors())
+  # step_kpca_rbf(all_predictors(), num_comp = tune())
+
+svm_model <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+svm_wflow <-
+  workflow() %>%
+  add_recipe(svm_recipe) %>%
+  add_model(svm_model)
+
+set.seed(10)
+svm_grid <-
+  svm_wflow %>%
+  parameters() %>%
+  grid_max_entropy(size = 1000)
+```
+
+We'll try an ANOVA racing tuning strategy
+```{r collapse = TRUE}
+set.seed(100)
+svm_tune_anova <-
+  svm_wflow %>%
+  tune_race_anova(
+        resamples = crossval,
+        grid = svm_grid,
+        metrics = metric_set(roc_auc, sens, spec, kap),
+        control = control_race(verbose_elim = TRUE)
+  )
+show_best(svm_tune_anova, metric = "roc_auc")
+plot_race(svm_tune_anova)
+best_anova <- select_best(svm_tune_anova, metric = "roc_auc")
+```
+
+Doesn't seem to be doing much better than random forest....
