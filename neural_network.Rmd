@@ -132,5 +132,81 @@ sln_fit <- sln_workflow %>%
 sln_fit %>% 
   collect_metrics()
 ```
+# Penalized Nerual Network Model 2 
+```{r}
+sln_2_spec <-
+  mlp(penalty=tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
 
+sln_2_spec %>% 
+  translate() 
+mixture()
+```
+
+```{r}
+sln_2_workflow <- 
+  workflow() %>%
+  add_model(sln_2_spec) %>% 
+  add_recipe(sln_recipe)
+```
+
+# we need to choose the penalty (furter split training into training and validation or do cross validation )
+```{r}
+sln_val <- validation_split(training(sln_split))
+sln_val
+```
+
+# Now we want to tune
+```{r}
+sln_penalty <- grid_regular(penalty(), levels=100)
+sln_2_tune <-
+  sln_2_workflow %>%
+  tune_grid(sln_val,
+            grid = sln_penalty,
+            metrics = metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
+sln_2_tune
+```
+
+```{r}
+sln_2_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "sens") %>%
+  ggplot(aes(x = penalty, y = mean)) + geom_line() + scale_x_log10() + geom_vline(xintercept = 1.023531e-09)
+
+autoplot(sln_2_tune)
+```
+
+```{r}
+sln_2_tune %>%
+  collect_metrics()
+
+sln_2_tune %>%
+  collect_metrics() %>%
+  filter(penalty <= 1e-2) %>%
+  filter(.metric == "sens") %>%
+  arrange(desc(mean))
+
+```
+
+# We have found the best tuning parameter and now we have to use it
+```{r}
+sln_2_tuned_workflow <- sln_2_workflow %>% 
+  finalize_workflow(parameters=list(penalty=1.023531e-09))
+
+sln_2_tuned_fit <- reg_2_tuned_workflow %>%
+  last_fit(reg_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy, detection_prevalence))
+```
+
+# Comparing the firts model with the penalysed model (with the best tuning paramter)
+```{r}
+collect_metrics(sln_2_tuned_fit)
+collect_metrics(sln_fit)
+```
+
+# For each of the client in our test set, let's have a look at the predicted target variable and the actual adverse variable.  
+```{r}
+sln_2_tuned_fit %>% 
+  collect_predictions()
+```
 

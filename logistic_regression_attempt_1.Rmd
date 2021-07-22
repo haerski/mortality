@@ -207,7 +207,3 @@ reg_2_tuned_fit %>%
   collect_predictions()
 ```
 
-```{r}
-reg_2_tuned_fit %>%
-  roc_curve()
-```

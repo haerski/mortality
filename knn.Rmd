@@ -135,5 +135,81 @@ knn_fit <- knn_workflow %>%
 knn_fit %>% 
   collect_metrics()
 ```
+# Penalized knn Model 2 
+```{r}
+knn_2_spec <-
+  nearest_neighbor(neighbors  = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_2_spec %>% 
+  translate() 
+mixture()
+```
+
+```{r}
+knn_2_workflow <- 
+  workflow() %>%
+  add_model(knn_2_spec) %>% 
+  add_recipe(knn_recipe)
+```
+
+# we need to choose the penalty (furter split training into training and validation or do cross validation )
+```{r}
+knn_val <- validation_split(training(knn_split))
+knn_val
+```
+
+# Now we want to tune
+```{r}
+knn_penalty <- grid_regular(neighbors(), levels=100)
+knn_2_tune <-
+  knn_2_workflow %>%
+  tune_grid(knn_val,
+            grid = knn_penalty,
+            metrics = metric_set(sens, spec, ppv, npv))
+knn_2_tune
+
+knn_2_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "sens") %>%
+  ggplot(aes(x = neighbors, y = mean)) + geom_line() + scale_x_log10() + geom_vline(xintercept = 5.5)
+
+autoplot(knn_2_tune)
+```
+
+```{r}
+knn_2_tune %>%
+  collect_metrics()
+
+knn_2_tune %>%
+  collect_metrics() %>%
+  filter(neighbors <= 6) %>%
+  filter(.metric == "sens") %>%
+  arrange(desc(mean))
+
+```
+
+# We have found the best tuning parameter and now we have to use it
+```{r}
+knn_2_tuned_workflow <- knn_2_workflow %>% 
+  finalize_workflow(parameters=list(neighbors=6))
+```
+```{r}
+knn_2_tuned_fit <- knn_2_tuned_workflow %>%
+  last_fit(knn_split, metrics=metric_set(sens, spec, ppv, npv))
+```
+
+# Comparing the firts model with the penalysed model (with the best tuning paramter)
+```{r}
+collect_metrics(knn_2_tuned_fit)
+collect_metrics(knn_fit)
+```
+
+# For each of the client in our test set, let's have a look at the predicted target variable and the actual adverse variable.  
+```{r}
+knn_2_tuned_fit %>% 
+  collect_predictions()
+```
 
 

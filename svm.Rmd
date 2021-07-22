@@ -132,6 +132,86 @@ svm_rbf_fit %>%
   collect_metrics()
 ```
 
+# Penalized SVM RBF Model 2 
+```{r}
+svm_rbf_2_spec <-
+  svm_rbf(cost=tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+svm_rbf_2_spec %>% 
+  translate() 
+mixture()
+```
+
+```{r}
+svm_rbf_2_workflow <- 
+  workflow() %>%
+  add_model(svm_rbf_2_spec) %>% 
+  add_recipe(svm_rbf_recipe)
+```
+
+# we need to choose the penalty (furter split training into training and validation or do cross validation )
+```{r}
+svm_rbf_val <- validation_split(training(svm_rbf_split))
+svm_rbf_val
+```
+
+# Now we want to tune
+```{r}
+svm_rbf_penalty <- grid_regular(cost(), levels=100)
+svm_rbf_2_tune <-
+  svm_rbf_2_workflow %>%
+  tune_grid(svm_rbf_val,
+            grid = svm_rbf_penalty,
+            metrics = metric_set(sens, spec, ppv, npv, bal_accuracy))
+svm_rbf_2_tune
+```
+
+```{r}
+svm_rbf_2_tune %>%
+  collect_metrics() %>%
+  filter(.metric == "sens") %>%
+  ggplot(aes(x = cost, y = mean)) + geom_line() + scale_x_log10() + geom_vline(xintercept = 4.350593e+00)
+
+autoplot(svm_rbf_2_tune)
+```
+
+```{r}
+svm_rbf_2_tune %>%
+  collect_metrics()
+
+svm_rbf_2_tune %>%
+  collect_metrics() %>%
+  filter(cost <= 32) %>%
+  filter(.metric == "sens") %>%
+  arrange(desc(mean))
+
+```
+
+# We have found the best tuning parameter and now we have to use it
+```{r}
+svm_rbf_2_tuned_workflow <- svm_rbf_2_workflow %>% 
+  finalize_workflow(parameters=list(cost=4.350593e+00))
+
+svm_rbf_2_tuned_fit <- svm_rbf_2_tuned_workflow %>%
+  last_fit(svm_rbf_split, metrics=metric_set(sens, spec, ppv, npv, bal_accuracy))
+```
+
+# Comparing the firts model with the penalysed model (with the best tuning paramter)
+```{r}
+collect_metrics(svm_rbf_2_tuned_fit)
+collect_metrics(svm_rbf_fit)
+```
+
+# For each of the client in our test set, let's have a look at the predicted target variable and the actual adverse variable.  
+```{r}
+svm_rbf_2_tuned_fit %>% 
+  collect_predictions()
+```
+
+
+
 # Polynomial Support Vector Machine model 
 
 # Engine
@@ -174,4 +254,5 @@ svm_poly_fit <- svm_poly_workflow %>%
 svm_poly_fit %>% 
   collect_metrics()
 ```
+
 
