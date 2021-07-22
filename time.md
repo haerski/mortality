@@ -17,6 +17,7 @@ library(skimr)
 library(lubridate)
 library(tsibble)
 library(glue)
+library(slider)
 per <- read_feather("data/simulation_data/all_persons.feather")
 
 clients <-
@@ -69,12 +70,13 @@ Also, look at weekly deaths instead of deaths to date
 ```r
 deaths <-
   read_feather("data/deaths_zip3.feather") %>%
-  mutate(wk = yearweek(date)) %>%
+  mutate(yw = yearweek(date)) %>%
   select(-date) %>%
-  group_by(zip3, wk) %>%
+  group_by(zip3, yw) %>%
   summarize(totdeaths = max(deaths)) %>%
-  mutate(deaths = totdeaths - lag(totdeaths, default = 0)) %>%
-  select(-totdeaths)
+  mutate(zip_deaths = totdeaths - lag(totdeaths, default = 0)) %>%
+  select(-totdeaths) %>%
+  ungroup()
 ## `summarise()` has grouped output by 'zip3'. You can override using the `.groups` argument.
 ```
 
@@ -84,18 +86,20 @@ Let's see what it looks like in Atlanta and LA. We normalize by population.
 deaths %>%
   left_join(zip_data, by = "zip3") %>%
   filter(zip3 %in% c("303", "900")) %>%
-  ggplot(aes(x = wk, color = zip3)) +
-  geom_line(aes(y = deaths / POP))
+  ggplot(aes(x = yw, color = zip3)) +
+  geom_line(aes(y = zip_deaths / POP))
 ```
 
 ![plot of chunk atl_la_covid](figure/atl_la_covid-1.png)
 
-Let's join client data and deaths
+One thing to note, there is no death data for zipcodes 202, 204, 753, 772 (which is fine, since there is no zip_data for those either).
+
+Let's join client data and deaths (maybe not?)
 
 ```r
-clients %<>%
-  left_join(deaths, by = "zip3") %>%
-  relocate(wk, deaths, .after = "zip3")
+# clients %<>%
+#   left_join(deaths, by = "zip3") %>%
+#   relocate(yw, zip_deaths, .after = "zip3")
 ```
 
 Next we look at the deaths only
@@ -114,7 +118,7 @@ Let's fix this
 per %<>%
   group_by(client, participant) %>%
   arrange(year, week, by_group = TRUE) %>%
-  slice_head(n=1) %>%
+  slice_head(n = 1) %>%
   ungroup()
 ```
 
@@ -144,8 +148,41 @@ per %<>%
 
 Next, we need some kind of a rolling count for AE. Looks like the package `slider` might help.
 I want actual claims per week for each client.
+We note that there are 4 clients that won't have any deaths
 
 ```r
-# TODO
+no_deaths <-
+  clients %>%
+  anti_join(per, by = "client") %>%
+  select(client) %>%
+  mutate(yw = yearweek("2019 w01"), claims = 0)
+```
+
+We compute face amount per week for each client. We also
+
+```r
+weekly_claims <-
+  per %>%
+  group_by(yw, client) %>%
+  summarize(claims = sum(FaceAmt), .groups = "drop") %>%
+  bind_rows(no_deaths) %>%
+  complete(yw, client, fill = list(claims = 0))
+## Error: Must group by variables found in `.data`.
+## * Column `yw` is not found.
+```
+
+We now have 65,369 rows, which is 131 weeks * 499 clients.
+
+Let's merge everything.
+
+```r
+weekly_data <-
+  clients %>%
+  left_join(weekly_claims, by = c("client")) %>%
+  relocate(yw) %>%
+  relocate(claims, .after = zip3) %>%
+  left_join(deaths, by = c("yw", "zip3")) %>%
+  relocate(zip_deaths, .after = claims) %>%
+  mutate(zip_deaths = replace_na(zip_deaths, 0))
 ```
 
