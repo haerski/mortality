@@ -1,3 +1,9 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  ig.width = 12, fig.height = 12, dpi = 300
+)
+```
+
 # Baseline model
 
 The goal of this documents is to compare some tuned and untuned models on a "baseline" dataset. We want to predict whether AE in 2020 goes above 3. We are only using 2019 data here! Next steps will be adding time-dependent data (e.g. COVID deaths per week per zipcode).
@@ -195,7 +201,7 @@ fit_wflows %>%
   geom_point() + geom_line() + facet_wrap(~ factor(.metric))
 ```
 
-Looks like adding the 2019 AE didn't help much! This is evidence for our hypothesis (AE 2019 doesn't hhave much effect on the final outcome).
+Looks like adding the 2019 AE didn't help much! This is evidence for our hypothesis (AE 2019 doesn't have much effect on the final outcome).
 It's also possible that the machine learning models (svn and neural net) could benefit from some tuning.
 
 Here are the models ranked by `roc_auc`
@@ -230,7 +236,7 @@ We can now choose the threshold based on what we need. (what do we need?)
 
 
 ## Tuning some models
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 tune_rec <-
   recipe(adverse ~ ., data = clients) %>%
   step_rm(ae_2019) %>%
@@ -271,12 +277,10 @@ models <- list(log = tune_log_spec,
 recipes <- list(no2019_rec)
 wflows <- workflow_set(recipes, models)
 
-# make a bigger grid!
-# or use something like finetune!
 results <-
   wflows %>%
   workflow_map(resamples = crossval,
-               grid = 10,
+               grid = 100,
                metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
                control = control_grid(save_pred = TRUE),
                seed = 828282,
@@ -339,7 +343,7 @@ svm_grid <-
 ```
 
 We'll try an ANOVA racing tuning strategy
-```{r collapse = TRUE}
+```{r race, collapse = TRUE, cache = TRUE}
 set.seed(100)
 svm_tune_anova <-
   svm_wflow %>%

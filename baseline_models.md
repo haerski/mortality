@@ -1,3 +1,5 @@
+
+
 # Baseline model
 
 The goal of this documents is to compare some tuned and untuned models on a "baseline" dataset. We want to predict whether AE in 2020 goes above 3. We are only using 2019 data here! Next steps will be adding time-dependent data (e.g. COVID deaths per week per zipcode).
@@ -6,13 +8,142 @@ The goal of this documents is to compare some tuned and untuned models on a "bas
 
 ```r
 library(tidyverse)
+```
+
+```
+## ── Attaching packages ───────────────────────────────────────────────────── tidyverse 1.3.1 ──
+```
+
+```
+## ✔ ggplot2 3.3.5     ✔ purrr   0.3.4
+## ✔ tibble  3.1.2     ✔ dplyr   1.0.7
+## ✔ tidyr   1.1.3     ✔ stringr 1.4.0
+## ✔ readr   2.0.0     ✔ forcats 0.5.1
+```
+
+```
+## ── Conflicts ──────────────────────────────────────────────────────── tidyverse_conflicts() ──
+## ✖ dplyr::filter() masks stats::filter()
+## ✖ dplyr::lag()    masks stats::lag()
+```
+
+```r
 library(tidymodels)
+```
+
+```
+## Registered S3 method overwritten by 'tune':
+##   method                   from   
+##   required_pkgs.model_spec parsnip
+```
+
+```
+## ── Attaching packages ──────────────────────────────────────────────────── tidymodels 0.1.3 ──
+```
+
+```
+## ✔ broom        0.7.8      ✔ rsample      0.1.0 
+## ✔ dials        0.0.9      ✔ tune         0.1.6 
+## ✔ infer        0.5.4      ✔ workflows    0.2.3 
+## ✔ modeldata    0.1.1      ✔ workflowsets 0.0.2 
+## ✔ parsnip      0.1.7      ✔ yardstick    0.0.8 
+## ✔ recipes      0.1.16
+```
+
+```
+## ── Conflicts ─────────────────────────────────────────────────────── tidymodels_conflicts() ──
+## ✖ scales::discard() masks purrr::discard()
+## ✖ dplyr::filter()   masks stats::filter()
+## ✖ recipes::fixed()  masks stringr::fixed()
+## ✖ dplyr::lag()      masks stats::lag()
+## ✖ yardstick::spec() masks readr::spec()
+## ✖ recipes::step()   masks stats::step()
+## • Use tidymodels_prefer() to resolve common conflicts.
+```
+
+```r
 library(probably)
+```
+
+```
+## 
+## Attaching package: 'probably'
+```
+
+```
+## The following objects are masked from 'package:base':
+## 
+##     as.factor, as.ordered
+```
+
+```r
 library(themis)
+```
+
+```
+## Registered S3 methods overwritten by 'themis':
+##   method                  from   
+##   bake.step_downsample    recipes
+##   bake.step_upsample      recipes
+##   prep.step_downsample    recipes
+##   prep.step_upsample      recipes
+##   tidy.step_downsample    recipes
+##   tidy.step_upsample      recipes
+##   tunable.step_downsample recipes
+##   tunable.step_upsample   recipes
+```
+
+```
+## 
+## Attaching package: 'themis'
+```
+
+```
+## The following objects are masked from 'package:recipes':
+## 
+##     step_downsample, step_upsample
+```
+
+```r
 library(feather)
 library(magrittr)
+```
+
+```
+## 
+## Attaching package: 'magrittr'
+```
+
+```
+## The following object is masked from 'package:purrr':
+## 
+##     set_names
+```
+
+```
+## The following object is masked from 'package:tidyr':
+## 
+##     extract
+```
+
+```r
 library(skimr)
 library(vip)
+```
+
+```
+## 
+## Attaching package: 'vip'
+```
+
+```
+## The following object is masked from 'package:utils':
+## 
+##     vi
+```
+
+```r
+library(finetune)
 per <- read_feather("data/simulation_data/all_persons.feather")
 ```
 
@@ -264,37 +395,37 @@ fit_wflows <-
                metrics = metric_set(roc_auc, sens, accuracy),
                verbose = TRUE)
 ## i  1 of 16 resampling: with2019ae_log
-## ✔  1 of 16 resampling: with2019ae_log (3.9s)
+## ✔  1 of 16 resampling: with2019ae_log (12.3s)
 ## i  2 of 16 resampling: with2019ae_logtuned
-## ✔  2 of 16 resampling: with2019ae_logtuned (4s)
+## ✔  2 of 16 resampling: with2019ae_logtuned (13.3s)
 ## i  3 of 16 resampling: with2019ae_forest
-## ✔  3 of 16 resampling: with2019ae_forest (5.5s)
+## ✔  3 of 16 resampling: with2019ae_forest (16.6s)
 ## i  4 of 16 resampling: with2019ae_foresttuned
-## ✔  4 of 16 resampling: with2019ae_foresttuned (5.1s)
+## ✔  4 of 16 resampling: with2019ae_foresttuned (18.2s)
 ## i  5 of 16 resampling: with2019ae_neural
-## ✔  5 of 16 resampling: with2019ae_neural (4.1s)
+## ✔  5 of 16 resampling: with2019ae_neural (13.3s)
 ## i  6 of 16 resampling: with2019ae_svmrbf
-## ✔  6 of 16 resampling: with2019ae_svmrbf (4s)
+## ✔  6 of 16 resampling: with2019ae_svmrbf (17.1s)
 ## i  7 of 16 resampling: with2019ae_svmpoly
-## ✔  7 of 16 resampling: with2019ae_svmpoly (4.2s)
+## ✔  7 of 16 resampling: with2019ae_svmpoly (14.2s)
 ## i  8 of 16 resampling: with2019ae_knnspec
-## ✔  8 of 16 resampling: with2019ae_knnspec (3.9s)
+## ✔  8 of 16 resampling: with2019ae_knnspec (13.6s)
 ## i  9 of 16 resampling: no2019ae_log
-## ✔  9 of 16 resampling: no2019ae_log (4.1s)
+## ✔  9 of 16 resampling: no2019ae_log (13.6s)
 ## i 10 of 16 resampling: no2019ae_logtuned
-## ✔ 10 of 16 resampling: no2019ae_logtuned (4.5s)
+## ✔ 10 of 16 resampling: no2019ae_logtuned (14.2s)
 ## i 11 of 16 resampling: no2019ae_forest
-## ✔ 11 of 16 resampling: no2019ae_forest (5.6s)
+## ✔ 11 of 16 resampling: no2019ae_forest (17.7s)
 ## i 12 of 16 resampling: no2019ae_foresttuned
-## ✔ 12 of 16 resampling: no2019ae_foresttuned (6s)
+## ✔ 12 of 16 resampling: no2019ae_foresttuned (19.5s)
 ## i 13 of 16 resampling: no2019ae_neural
-## ✔ 13 of 16 resampling: no2019ae_neural (4.4s)
+## ✔ 13 of 16 resampling: no2019ae_neural (14.5s)
 ## i 14 of 16 resampling: no2019ae_svmrbf
-## ✔ 14 of 16 resampling: no2019ae_svmrbf (4.3s)
+## ✔ 14 of 16 resampling: no2019ae_svmrbf (14.7s)
 ## i 15 of 16 resampling: no2019ae_svmpoly
-## ✔ 15 of 16 resampling: no2019ae_svmpoly (4.6s)
+## ✔ 15 of 16 resampling: no2019ae_svmpoly (14.9s)
 ## i 16 of 16 resampling: no2019ae_knnspec
-## ✔ 16 of 16 resampling: no2019ae_knnspec (4.2s)
+## ✔ 16 of 16 resampling: no2019ae_knnspec (14.2s)
 ```
 
 Comparing our metrics for the models (unfortunately I couldn't figure out how to show which recipe was picked...)
@@ -317,18 +448,18 @@ fit_wflows %>% collect_metrics()
 
 ```
 ## # A tibble: 48 x 9
-##    wflow_id  .config  preproc model .metric .estimator  mean     n std_err
-##    <chr>     <chr>    <chr>   <chr> <chr>   <chr>      <dbl> <int>   <dbl>
-##  1 with2019… Preproc… recipe  logi… accura… binary     0.769    10  0.0160
-##  2 with2019… Preproc… recipe  logi… roc_auc binary     0.718    10  0.0302
-##  3 with2019… Preproc… recipe  logi… sens    binary     0.905    10  0.0157
-##  4 with2019… Preproc… recipe  logi… accura… binary     0.769    10  0.0132
-##  5 with2019… Preproc… recipe  logi… roc_auc binary     0.731    10  0.0318
-##  6 with2019… Preproc… recipe  logi… sens    binary     0.916    10  0.0146
-##  7 with2019… Preproc… recipe  rand… accura… binary     0.845    10  0.0174
-##  8 with2019… Preproc… recipe  rand… roc_auc binary     0.877    10  0.0188
-##  9 with2019… Preproc… recipe  rand… sens    binary     0.953    10  0.0110
-## 10 with2019… Preproc… recipe  rand… accura… binary     0.858    10  0.0163
+##    wflow_id     .config    preproc model  .metric .estimator  mean     n std_err
+##    <chr>        <chr>      <chr>   <chr>  <chr>   <chr>      <dbl> <int>   <dbl>
+##  1 with2019ae_… Preproces… recipe  logis… accura… binary     0.769    10  0.0160
+##  2 with2019ae_… Preproces… recipe  logis… roc_auc binary     0.718    10  0.0302
+##  3 with2019ae_… Preproces… recipe  logis… sens    binary     0.905    10  0.0157
+##  4 with2019ae_… Preproces… recipe  logis… accura… binary     0.769    10  0.0132
+##  5 with2019ae_… Preproces… recipe  logis… roc_auc binary     0.731    10  0.0318
+##  6 with2019ae_… Preproces… recipe  logis… sens    binary     0.916    10  0.0146
+##  7 with2019ae_… Preproces… recipe  rand_… accura… binary     0.845    10  0.0174
+##  8 with2019ae_… Preproces… recipe  rand_… roc_auc binary     0.877    10  0.0188
+##  9 with2019ae_… Preproces… recipe  rand_… sens    binary     0.953    10  0.0110
+## 10 with2019ae_… Preproces… recipe  rand_… accura… binary     0.858    10  0.0163
 ## # … with 38 more rows
 ```
 
@@ -344,7 +475,7 @@ fit_wflows %>%
 
 ![plot of chunk ae2019_improvement](figure/ae2019_improvement-1.png)
 
-Looks like adding the 2019 AE didn't help much! This is evidence for our hypothesis (AE 2019 doesn't hhave much effect on the final outcome).
+Looks like adding the 2019 AE didn't help much! This is evidence for our hypothesis (AE 2019 doesn't have much effect on the final outcome).
 It's also possible that the machine learning models (svn and neural net) could benefit from some tuning.
 
 Here are the models ranked by `roc_auc`
@@ -412,6 +543,13 @@ We can now choose the threshold based on what we need. (what do we need?)
 ## Tuning some models
 
 ```r
+tune_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  step_zv(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_normalize(all_predictors())
+
 tune_log_spec <-
   logistic_reg(penalty = tune()) %>%
   set_engine("glmnet") %>%
@@ -445,28 +583,26 @@ models <- list(log = tune_log_spec,
 recipes <- list(no2019_rec)
 wflows <- workflow_set(recipes, models)
 
-# make a bigger grid!
-# or use something like finetune!
 results <-
   wflows %>%
   workflow_map(resamples = crossval,
-               grid = 10,
+               grid = 100,
                metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
                control = control_grid(save_pred = TRUE),
                seed = 828282,
                verbose = TRUE)
 ## i 1 of 4 tuning:     recipe_log
-## ✔ 1 of 4 tuning:     recipe_log (5.4s)
+## ✔ 1 of 4 tuning:     recipe_log (27.1s)
 ## i 2 of 4 tuning:     recipe_forest
 ## i Creating pre-processing data to finalize unknown parameter: mtry
-## ✔ 2 of 4 tuning:     recipe_forest (52.1s)
+## ✔ 2 of 4 tuning:     recipe_forest (28m 12.3s)
 ## i 3 of 4 tuning:     recipe_sln
-## ✔ 3 of 4 tuning:     recipe_sln (46.4s)
+## ✔ 3 of 4 tuning:     recipe_sln (24m 15.3s)
 ## i 4 of 4 tuning:     recipe_svm
-## ✔ 4 of 4 tuning:     recipe_svm (38.2s)
+## ✔ 4 of 4 tuning:     recipe_svm (19m 17.1s)
 
 autoplot(results)
-## Warning: Removed 10 rows containing missing values (geom_point).
+## Warning: Removed 104 rows containing missing values (geom_point).
 ```
 
 ![plot of chunk unnamed-chunk-13](figure/unnamed-chunk-13-1.png)
@@ -499,12 +635,84 @@ last_svm %>%
 ## # A tibble: 6 x 4
 ##   .metric  .estimator .estimate .config             
 ##   <chr>    <chr>          <dbl> <chr>               
-## 1 accuracy binary         0.790 Preprocessor1_Model1
-## 2 sens     binary         0.935 Preprocessor1_Model1
-## 3 spec     binary         0.375 Preprocessor1_Model1
-## 4 ppv      binary         0.811 Preprocessor1_Model1
-## 5 npv      binary         0.667 Preprocessor1_Model1
-## 6 roc_auc  binary         0.788 Preprocessor1_Model1
+## 1 accuracy binary        0.75   Preprocessor1_Model1
+## 2 sens     binary        1      Preprocessor1_Model1
+## 3 spec     binary        0.0312 Preprocessor1_Model1
+## 4 ppv      binary        0.748  Preprocessor1_Model1
+## 5 npv      binary        1      Preprocessor1_Model1
+## 6 roc_auc  binary        0.825  Preprocessor1_Model1
 ```
 
+## SVM RBF
+I'm kind of curious about what can be done with the SVM.
+We will go with the [recommended preprocessing steps from TMWR](https://www.tmwr.org/pre-proc-table.html).
 
+
+```r
+svm_recipe <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  step_zv(all_predictors()) %>%
+  step_YeoJohnson(all_predictors()) %>%
+  step_normalize(all_predictors())
+  # step_kpca_rbf(all_predictors(), num_comp = tune())
+
+svm_model <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+svm_wflow <-
+  workflow() %>%
+  add_recipe(svm_recipe) %>%
+  add_model(svm_model)
+
+set.seed(10)
+svm_grid <-
+  svm_wflow %>%
+  parameters() %>%
+  grid_max_entropy(size = 1000)
+```
+
+We'll try an ANOVA racing tuning strategy
+
+```r
+set.seed(100)
+svm_tune_anova <-
+  svm_wflow %>%
+  tune_race_anova(
+        resamples = crossval,
+        grid = svm_grid,
+        metrics = metric_set(roc_auc, sens, spec, kap),
+        control = control_race(verbose_elim = TRUE)
+  )
+## ℹ Racing will maximize the roc_auc metric.
+## ℹ Resamples are analyzed in a random order.
+## ℹ Fold10:  695 eliminated;  305 candidates remain.
+## ℹ Fold01:    0 eliminated;  305 candidates remain.
+## ℹ Fold08:    0 eliminated;  305 candidates remain.
+## ℹ Fold05:    1 eliminated;  304 candidates remain.
+## ℹ Fold06:   75 eliminated;  229 candidates remain.
+## ℹ Fold09:    0 eliminated;  229 candidates remain.
+## ℹ Fold03:    0 eliminated;  229 candidates remain.
+show_best(svm_tune_anova, metric = "roc_auc")
+## # A tibble: 5 x 9
+##    cost rbf_sigma  margin .metric .estimator  mean     n std_err .config        
+##   <dbl>     <dbl>   <dbl> <chr>   <chr>      <dbl> <int>   <dbl> <chr>          
+## 1  3.85    0.0637 0.152   roc_auc binary     0.823    10  0.0234 Preprocessor1_…
+## 2 10.2     0.0562 0.0903  roc_auc binary     0.819    10  0.0271 Preprocessor1_…
+## 3 12.6     0.0440 0.181   roc_auc binary     0.818    10  0.0282 Preprocessor1_…
+## 4  2.52    0.0824 0.0329  roc_auc binary     0.816    10  0.0226 Preprocessor1_…
+## 5  2.49    0.0478 0.00818 roc_auc binary     0.814    10  0.0238 Preprocessor1_…
+plot_race(svm_tune_anova)
+## Warning in grid.Call.graphics(C_lines, x$x, x$y, index, x$arrow): semi-
+## transparency is not supported on this device: reported only once per page
+```
+
+![plot of chunk race](figure/race-1.png)
+
+```r
+best_anova <- select_best(svm_tune_anova, metric = "roc_auc")
+```
+
+Doesn't seem to be doing much better than random forest....
