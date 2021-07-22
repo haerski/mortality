@@ -1,0 +1,257 @@
+---
+title: "xgboost_attempt2"
+author: "Lei Yang"
+date: "7/21/2021"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+per <- read_feather("data/simulation_data/all_persons.feather")
+```
+
+Compute some summary statistic for each client.
+```{r}
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+```
+
+We can add some demographic information based on zip3.
+```{r}
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+```
+There seems to be some clients with some zip codes that we cannot deal with. These are the ones
+```{r}
+clients %>%
+  anti_join(zip_data, by = "zip3") %>%
+  select(zip3)
+```
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+
+## Workflow set
+We'll evaluate models using a workflow set. To make our life easier, we will remove some variables and use a formula instead of a recipe.
+```{r}
+clients <-
+  clients %>%
+  select(-client, -zip3, -ae_2020, -actual_2020, -actual_2019)
+
+clients
+```
+We now gather our recipes and models.
+```{r}
+#with2019_rec <-
+#  recipe(adverse ~ ., data = clients) %>%
+#  step_zv(all_predictors()) %>%
+#  step_normalize(all_predictors(), -all_nominal())
+#no2019_rec <-
+#  with2019_rec %>%
+#  step_rm(ae_2019)
+
+
+
+#xgboost
+xgb_spec <- boost_tree(
+  trees = 250, 
+  tree_depth = tune(), min_n = tune(), 
+  loss_reduction = tune(),                     ## first three: model complexity
+  sample_size = tune(), mtry = tune(),         ## randomness
+  learn_rate = tune(),                         ## step size
+) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_spec
+
+
+#models <- list(
+#               xgbspec = xgb_spec
+#               )
+
+#recipes <- list(#"with2019ae" = with2019_rec,
+#                "no2019ae" = no2019_rec)
+#wflows <- workflow_set(recipes, models)
+```
+
+Data splitting
+```{r}
+
+set.seed(30308)
+init <- initial_split(clients, strata = adverse)
+clients_train <- training(init)
+clients_test <- testing(init)
+
+
+
+set.seed(30308)
+crossval <- vfold_cv(training(init), strata = adverse)
+```
+
+
+
+
+let’s set up possible values for these hyperparameters to try. Let’s use a space-filling design so we can cover the hyperparameter space as well as possible.
+
+```{r}
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), clients_train),
+  learn_rate(),
+  size = 50
+)
+
+xgb_grid
+
+```
+Let’s put the model specification into a workflow for convenience. Since we don’t have any complicated data preprocessing, we can use add_formula() as our data preprocessor.
+
+```{r}
+xgb_wf <- workflow() %>%
+  add_formula(adverse ~ .) %>%
+  add_model(xgb_spec)
+
+xgb_wf
+```
+
+doParallel::registerDoParallel()
+
+```{r}
+set.seed(234)
+xgb_res <- tune_grid(
+  xgb_wf,
+  resamples = crossval,
+  grid = xgb_grid,
+  control = control_resamples(save_pred = TRUE
+                              )
+)
+
+xgb_res
+```
+
+We can explore the metrics for all these models.
+
+```{r}
+collect_metrics(xgb_res)
+```
+We can also use visualization to understand our results.
+
+```{r}
+xgb_res %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, mtry:sample_size) %>%
+  pivot_longer(mtry:sample_size,
+               values_to = "value",
+               names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+What are the best performing sets of parameters?
+
+```{r}
+show_best(xgb_res, "roc_auc")
+```
+There may have been lots of parameters, but we were able to get good performance with several different combinations. Let’s choose the best one.
+
+```{r}
+best_auc <- select_best(xgb_res, "roc_auc")
+best_auc
+```
+
+Now let’s finalize our tuneable workflow with these parameter values.
+
+```{r}
+final_xgb <- finalize_workflow(
+  xgb_wf,
+  best_auc
+)
+
+final_xgb
+```
+What are the most important parameters for variable importance?
+
+```{r}
+library(vip)
+
+final_xgb %>%
+  fit(data = clients_train) %>%
+  extract_fit_parsnip() %>%
+  vip(geom = "point")
+
+```
+
+
+```{r}
+final_res <- last_fit(final_xgb, init)
+
+final_res
+collect_metrics(final_res)
+```
+
+ We can also create a ROC curve for the testing set.
+
+```{r}
+final_res %>%
+  collect_predictions() %>%
+  roc_curve(adverse, .pred_adverse) %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(size = 1.5, color = "midnightblue") +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    size = 1.2
+  )
+```
