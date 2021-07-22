@@ -1,0 +1,143 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 6, fig.height = 6, dpi = 300, cache = TRUE, collapse = TRUE
+)
+```
+
+# Time-based models
+Here we will look at what happens when time-dependent data is added. At the moment, we only use deaths per day per zipcode
+
+## Data wrangling
+This is going to be mostly the same as `baseline_models.Rmd`. Refer to that file for more details.
+Note that here we're not extracting the AEs.
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(feather)
+# library(arrow)
+library(magrittr)
+library(skimr)
+library(lubridate)
+library(tsibble)
+library(glue)
+per <- read_feather("data/simulation_data/all_persons.feather")
+
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt)
+  )
+
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+Now we have to be careful...
+
+We take daily covid deaths and make them weekly.
+Also, look at weekly deaths instead of deaths to date
+```{r}
+deaths <-
+  read_feather("data/deaths_zip3.feather") %>%
+  mutate(wk = yearweek(date)) %>%
+  select(-date) %>%
+  group_by(zip3, wk) %>%
+  summarize(totdeaths = max(deaths)) %>%
+  mutate(deaths = totdeaths - lag(totdeaths, default = 0)) %>%
+  select(-totdeaths)
+```
+
+Let's see what it looks like in Atlanta and LA. We normalize by population.
+```{r atl_la_covid}
+deaths %>%
+  left_join(zip_data, by = "zip3") %>%
+  filter(zip3 %in% c("303", "900")) %>%
+  ggplot(aes(x = wk, color = zip3)) +
+  geom_line(aes(y = deaths / POP))
+```
+
+Let's join client data and deaths
+```{r}
+clients %<>%
+  left_join(deaths, by = "zip3") %>%
+  relocate(wk, deaths, .after = "zip3")
+```
+
+Next we look at the deaths only
+```{r}
+per %<>%
+  drop_na() %>%
+  select(-month)
+```
+
+2019 didn't have 53 weeks, so the deaths on week 53 in 2019 will be changed to death in week 1 of 2020.
+I tried to do this, but then it turns out that some individuals die many times!!!
+Let's fix this
+```{r}
+per %<>%
+  group_by(client, participant) %>%
+  arrange(year, week, by_group = TRUE) %>%
+  slice_head(n=1) %>%
+  ungroup()
+```
+
+Now back to the 53 week business
+```{r}
+wk53 <-
+  per %>%
+  filter(year == 2019, week == 53) %>%
+  mutate(year = 2020, week = 1)
+per %<>%
+  rows_update(wk53, by = c("client", "participant"))
+```
+
+The tibble `per` contains all the people that die and their deathweek. Everyone should die only once now! Let's convert the week and year into a yearweek object
+```{r}
+per %<>%
+  nest_by(week, year) %>%
+  mutate(yw = yearweek(glue("{year} w{week}")), .before = "week") %>%
+  ungroup() %>%
+  select(-week, -year) %>%
+  unnest(cols = c(data))
+```
+
+
+
+Next, we need some kind of a rolling count for AE. Looks like the package `slider` might help.
+I want actual claims per week for each client.
+```{r}
+# TODO
+```
+
