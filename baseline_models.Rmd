@@ -167,7 +167,7 @@ crossval <- vfold_cv(training(init), strata = adverse)
 ```
 
 Fit all models and estimate metrics using 10-fold cross-validation. We're not performing any tuning here (although we could do that very easily!!!).
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 fit_wflows <-
   wflows %>%
   workflow_map(fn = "fit_resamples",
@@ -229,7 +229,7 @@ We can now choose the threshold based on what we need. (what do we need?)
 
 
 ## Tuning some models
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 tune_log_spec <-
   logistic_reg(penalty = tune()) %>%
   set_engine("glmnet") %>%
@@ -304,7 +304,7 @@ last_svm %>%
 ## Tuning a final forest
 We've concluded that the forest is the best model here.
 Let's tune a forest (by `roc_auc`) and send the best one to Doug.
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 ranger_spec <-
   rand_forest(mtry = tune(),
               min_n = tune(),
