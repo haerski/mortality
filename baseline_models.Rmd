@@ -167,7 +167,7 @@ crossval <- vfold_cv(training(init), strata = adverse)
 ```
 
 Fit all models and estimate metrics using 10-fold cross-validation. We're not performing any tuning here (although we could do that very easily!!!).
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 fit_wflows <-
   wflows %>%
   workflow_map(fn = "fit_resamples",
@@ -229,7 +229,7 @@ We can now choose the threshold based on what we need. (what do we need?)
 
 
 ## Tuning some models
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 tune_log_spec <-
   logistic_reg(penalty = tune()) %>%
   set_engine("glmnet") %>%
@@ -301,4 +301,76 @@ last_svm %>%
 
 ```
 
+## Tuning a final forest
+We've concluded that the forest is the best model here.
+Let's tune a forest (by `roc_auc`) and send the best one to Doug.
+```{r collapse = TRUE, cache = TRUE}
+ranger_spec <-
+  rand_forest(mtry = tune(),
+              min_n = tune(),
+              trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 13) %>%
+  set_mode("classification")
+
+ranger_wflow <-
+  workflow() %>%
+  add_recipe(no2019_rec) %>%
+  add_model(ranger_spec)
+
+ranger_params <-
+  ranger_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1, 23)))
+
+ranger_grid <-
+  grid_max_entropy(ranger_params,
+                   size = 100)
+ranger_tune <-
+  tune_grid(
+    ranger_wflow,
+    resamples = crossval,
+    grid = ranger_grid,
+    control = control_grid(verbose = TRUE, parallel_over = "everything")
+  )
+
+autoplot(ranger_tune)
+show_best(ranger_tune, metric = "roc_auc")
+ranger_best <- select_best(ranger_tune, metric = "roc_auc")
+ranger_best <- list(mtry = 10, min_n = 2)
+ranger_final <-
+  ranger_wflow %>%
+  finalize_workflow(ranger_best)
+
+ranger_fit <-
+  ranger_final %>%
+  last_fit(init)
+
+ranger_fit %>%
+  collect_metrics()
+
+ranger_pred <-
+  ranger_fit %>%
+  collect_predictions()
+
+ranger_pred %>%
+  roc_curve(adverse, `.pred_ae > 3`) %>%
+  autoplot()
+
+trained_wflow <-
+  ranger_fit %>%
+  extract_workflow()
+  
+# write_rds(trained_wflow, "ranger_wflow.RDS")
+
+engine <-
+  trained_wflow  %>%
+  extract_fit_engine()
+
+trained_wflow %>%
+  extract_recipe(estimated = TRUE) %>%
+  bake(testing(init))
+
+trained_wflow %>%
+  predict(testing(init), type = "prob")
+```
 
