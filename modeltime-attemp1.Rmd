@@ -1,0 +1,505 @@
+# Baseline model
+
+The goal of this documents is to compare some tuned and untuned models on a "baseline" dataset. We want to predict whether AE in 2020 goes above 3. We are only using 2019 data here! Next steps will be adding time-dependent data (e.g. COVID deaths per week per zipcode).
+
+## Common data
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(timetk)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(dplyr)
+library(lubridate)
+```
+
+#Read the first simulate data
+```{r}
+  experience <- readRDS("data/simulation_data/experience_weekly_1.RDS")
+  experience$death[experience$death==2] <- 1
+  
+  person <-readRDS("data/simulation_data/person_1.RDS")
+```
+
+Compute some summary statistic for each client.
+```{r}
+ clients <- experience %>%
+    left_join(person, by = c("client", "participant"))%>%
+    #mutate(kmonth = (month-1) %/% k)%>%
+    #group_by(client, participant,zip3,  kmonth, year)%>%
+    group_by(client, participant,zip3, year,month)%>%
+    summarise(actual = sum(death) * FaceAmt, 
+              expect = sum(qx) * FaceAmt, 
+              FaceAmt = FaceAmt,
+              qx = sum(qx),
+              sex = Sex,
+              age = Age, 
+              industry = industry,
+              collar = collar) %>%
+    ungroup()%>%
+    group_by(client, zip3, year, month)%>%
+    #group_by(client, zip3, year)%>%
+    summarise(actual = sum(actual), 
+              expect = sum(expect), 
+              size = n(),
+              volume = sum(FaceAmt),
+              avg_qx = mean(qx),
+              avg_age = mean(age),
+              per_male = sum(sex == "Male") / size,
+              per_blue_collar = sum(collar == "blue") / size,
+              ) %>%
+    mutate(ae = actual / expect)%>%
+    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    adverse = factor(adverse))%>%
+    relocate(adverse, ae, .after = zip3)%>%
+    ungroup()%>%
+    group_by(client)
+```
+
+We can add some demographic information based on zip3.
+```{r}
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+```
+There seems to be some clients with some zip codes that we cannot deal with. These are the ones
+```{r}
+clients %>%
+  anti_join(zip_data, by = "zip3") %>%
+  select(zip3)
+```
+These correspond to the following areas
+
+ZIP3 | Area       |
+-----|------------|
+969  | Guam, Palau, Federated States of Micronesia, Northern Mariana Islands, Marshall Islands |
+093  | Military bases in Iraq and Afghanistan |
+732  | Not in use |
+872  | Not in use |
+004  | Not in use |
+202  | Washington DC, Government 1 |
+
+We ignore clients with these zip codes. There are also two clients in DC for which we're missing election data. We will ignore those as well.
+```{r}
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+
+## Workflow set
+We'll evaluate models using a workflow set. To make our life easier, we will remove some variables and use a formula instead of a recipe.
+```{r}
+clients<-
+  clients %>%
+  mutate(day = 1)%>%
+  mutate(zip3 = as.factor(zip3))%>%
+  mutate(client = as.factor(client))%>%
+  filter(year!=2019)
+clients$date <- as.Date(with(clients, paste(year, month, day,sep="-")) , "%Y-%m-%d")
+
+  #select(-client, -zip3, -ae_2020, -actual_2020, -actual_2019)
+```
+split
+```{r}
+#split
+  set.seed = 1234
+  splits <-  clients%>%time_series_split(initial = "6 months", assess = "6 months", cumulative = TRUE)
+  train = training(splits)
+  test = testing(splits)
+  crossval <- vfold_cv(training(splits), strata = ae)
+```
+We now gather our recipes and models.
+```{r}
+rec_obj <-
+    recipe(ae ~ ., data = training(splits)) %>%
+    step_mutate(zip3 = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date) %>%
+    step_rm(year,month,day,zip3)%>%
+    step_rm(adverse)%>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+    step_normalize(all_predictors(), -all_nominal())
+```
+```{r}
+summary(prep(rec_obj))
+bake(prep(rec_obj),training(splits))
+```
+```{r}
+recipes <- list(rec_obj)
+```
+
+engine
+```{r}
+log_spec <-
+  logistic_reg() %>%
+  set_engine("glm") %>%
+  #set_mode("classification")
+  set_mode("unknown")
+tuned_log_spec <-
+  logistic_reg(penalty = 0.00118) %>%
+  set_engine("glmnet") %>%
+  #set_mode("classification")
+  set_mode("unknown")
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+sln_spec <-
+  mlp() %>%
+  set_engine("nnet") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  #set_mode("classification")
+  set_mode("regression")
+
+models <- list(log = log_spec,
+               logtuned = tuned_log_spec,
+               forest = forest_spec,
+               foresttuned = tuned_forest_spec,
+               neural = sln_spec,
+               svmrbf = svm_rbf_spec,
+               svmpoly = svm_poly_spec,
+               knnspec = knn_spec)
+```
+```{r}
+wflows <- workflow_set(recipes, models)
+```
+
+
+```{r}
+wflw_log <- workflow() %>%
+    add_model(
+        log_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_tunedlog <- workflow() %>%
+    add_model(
+        tuned_log_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+```
+```{r}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_neural <- workflow() %>%
+    add_model(
+        sln_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_svmpoly <- workflow() %>%
+    add_model(
+        svm_poly_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+               
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))               
+```
+Create a Modeltime Table
+```{r}
+model_tbl <- modeltime_table(
+    #wflw_log,
+    #wflw_tunedlog,
+    wflw_rf,
+    wflw_tunedrf,
+    wflw_neural,
+    wflw_svmrbf,
+    wflw_svmpoly,
+    wflw_knnspec 
+)
+
+model_tbl
+```
+
+
+Calibrate by zip3
+```{r}
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+
+calib_tbl
+```
+
+Measure Accuracy
+```{r}
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+```{r}
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+Forecast the Data
+```{r}
+calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+```{r}
+residuals_tbl <- calib_tbl  %>%
+    modeltime_calibrate(new_data = testing(splits)) %>%
+    modeltime_residuals()
+
+residuals_tbl %>%
+    #group_by(client) %>%
+    #filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_residuals(
+        .type = "timeplot",
+        .interactive = FALSE,
+    )
+```
+```{r}
+calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+```
+
+#only consider date
+split
+```{r}
+#split
+clients1 <- clients %>%
+  select(zip3, date, ae,client)
+  set.seed = 1234
+  splits <-  clients1%>%time_series_split(initial = "6 months", assess = "6 months", cumulative = TRUE)
+  train = training(splits)
+  test = testing(splits)
+  crossval <- vfold_cv(training(splits), strata = ae)
+```
+```{r}
+rec_obj <-
+    recipe(ae ~ ., data = training(splits)) %>%
+    step_mutate(zip3 = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date) %>%
+    step_rm(zip3)%>%
+    #step_rm(adverse)%>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+    step_normalize(all_predictors(), -all_nominal())
+```
+```{r}
+summary(prep(rec_obj))
+bake(prep(rec_obj),training(splits))
+```
+
+```{r}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_neural <- workflow() %>%
+    add_model(
+        sln_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_svmpoly <- workflow() %>%
+    add_model(
+        svm_poly_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+               
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))               
+```
+Create a Modeltime Table
+```{r}
+model_tbl <- modeltime_table(
+    #wflw_log,
+    #wflw_tunedlog,
+    wflw_rf,
+    wflw_tunedrf,
+    wflw_neural,
+    wflw_svmrbf,
+    wflw_svmpoly,
+    wflw_knnspec 
+)
+
+model_tbl
+```
+Calibrate by zip3
+```{r}
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+
+calib_tbl
+```
+
+Measure Accuracy
+```{r}
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+```{r}
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+Forecast the Data
+```{r}
+calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+```{r}
+residuals_tbl <- calib_tbl  %>%
+    modeltime_calibrate(new_data = testing(splits)) %>%
+    modeltime_residuals()
+
+residuals_tbl %>%
+    #group_by(client) %>%
+    #filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_residuals(
+        .type = "timeplot",
+        .interactive = FALSE,
+    )
+```
+```{r}
+calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+```
