@@ -15,13 +15,6 @@ library(vip)
 per <- read_feather("data/simulation_data/all_persons.feather")
 ```
 
-```{r opts, echo = FALSE}
-knitr::opts_chunk$set(
-  fig.path = "images/"
-)
-```
-
-
 Compute some summary statistic for each client.
 ```{r}
 clients <-
@@ -90,9 +83,9 @@ ZIP3 | Area       |
 
 We ignore clients with these zip codes. There are also two clients in DC for which we're missing election data. We will ignore those as well.
 ```{r}
-#clients %<>%
-#  inner_join(zip_data, by = "zip3") %>%
-#  drop_na()
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
 ```
 
 We now have our full dataset. Behold!
@@ -152,30 +145,6 @@ knn_spec <-
   set_engine("kknn") %>%
   set_mode("classification")
 
-
-xgb_spec <- boost_tree(
-  trees = 250, 
-  tree_depth = 5, min_n = 4, 
-  loss_reduction = 1.76047836572171e-10,                     ## first three: model complexity
-  sample_size = 0.883587669710218, mtry = 5,         ## randomness
-  learn_rate = 8.5485672736443e-10,                         ## step size
-) %>% 
-  set_engine("xgboost") %>% 
-  set_mode("classification")
-
-
-
-#mtry = 5
-#  trees = 250
-#  min_n = 4
-#  tree_depth = 5
-#  learn_rate = 8.5485672736443e-10
-#  loss_reduction = 1.76047836572171e-10
-#  sample_size = 0.883587669710218
-
-
-
-
 models <- list(log = log_spec,
                logtuned = tuned_log_spec,
                forest = forest_spec,
@@ -183,10 +152,7 @@ models <- list(log = log_spec,
                neural = sln_spec,
                svmrbf = svm_rbf_spec,
                svmpoly = svm_poly_spec,
-               knnspec = knn_spec,
-               xgbspec = xgb_spec
-               )
-
+               knnspec = knn_spec)
 recipes <- list("with2019ae" = with2019_rec,
                 "no2019ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
@@ -194,7 +160,6 @@ wflows <- workflow_set(recipes, models)
 
 Data splitting
 ```{r}
-clients
 set.seed(30308)
 init <- initial_split(clients, strata = adverse)
 set.seed(30308)
