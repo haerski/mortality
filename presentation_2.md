@@ -4,8 +4,72 @@
 # Presentation 2 script
 
 ## Data loading
-No need to talk about this
+No need to talk about this.
+Please download the latest version of `data/simulation_data/all_persons.feather` from Google Drive.
 
+```r
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+per <- read_feather("data/simulation_data/all_persons.feather")
+
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2021 = sum(FaceAmt[year == 2021], na.rm = TRUE),
+    ae_2021 = actual_2021 / (expected / 2),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+
+
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+
+
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
 
 We now have our full dataset. Behold!
 
@@ -20,12 +84,12 @@ Table: Data summary
 |:------------------------|:-------|
 |Name                     |clients |
 |Number of rows           |492     |
-|Number of columns        |31      |
+|Number of columns        |33      |
 |_______________________  |        |
 |Column type frequency:   |        |
 |character                |2       |
 |factor                   |1       |
-|numeric                  |28      |
+|numeric                  |30      |
 |________________________ |        |
 |Group variables          |None    |
 
@@ -57,6 +121,8 @@ Table: Data summary
 |per_male        |         0|             1|         0.57|         0.10|       0.22|         0.50|         0.56|         0.64| 8.900000e-01|▁▃▇▅▁ |
 |per_blue_collar |         0|             1|         1.00|         0.00|       1.00|         1.00|         1.00|         1.00| 1.000000e+00|▁▁▇▁▁ |
 |expected        |         0|             1|   1064558.77|   1040313.34|   11604.50|    346322.94|    827888.67|   1427761.03| 1.189533e+07|▇▁▁▁▁ |
+|actual_2021     |         0|             1|   7303879.17|  17390932.42|       0.00|   1018337.50|   3021187.50|   7500950.00| 2.211325e+08|▇▁▁▁▁ |
+|ae_2021         |         0|             1|        14.17|        19.13|       0.00|         4.24|         7.91|        15.17| 1.457200e+02|▇▁▁▁▁ |
 |actual_2020     |         0|             1|  14300179.17|  38311222.22|       0.00|   1933918.75|   4316787.50|  13739356.25| 4.280830e+08|▇▁▁▁▁ |
 |actual_2019     |         0|             1|   1087581.25|   1247699.93|       0.00|    224218.75|    674962.50|   1605662.50| 1.362532e+07|▇▁▁▁▁ |
 |ae_2019         |         0|             1|         0.98|         0.81|       0.00|         0.47|         0.85|         1.31| 6.290000e+00|▇▂▁▁▁ |
@@ -77,3 +143,19 @@ Table: Data summary
 |income          |         0|             1|     79056.02|     23916.16|   38621.49|     62130.76|     73570.69|     85137.47| 1.352340e+05|▃▇▅▂▂ |
 |POP             |         0|             1|    785665.87|    558640.36|   33245.00|    346048.00|    771280.00|    974040.00| 2.906700e+06|▇▇▂▁▁ |
 |density         |         0|             1|         0.00|         0.00|       0.00|         0.00|         0.00|         0.00| 3.000000e-02|▇▁▁▁▁ |
+
+## How many were actually adverse?
+
+```r
+clients %>%
+  transmute(
+    `2019` = ae_2019 > 3,
+    `2020` = ae_2020 > 3,
+    `2021` = ae_2021 > 3) %>%
+  pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `ae > 3` = "TRUE", `ae < 3` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar()
+```
+
+![plot of chunk unnamed-chunk-3](figures/pres-unnamed-chunk-3-1.png)
+

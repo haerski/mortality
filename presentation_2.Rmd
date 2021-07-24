@@ -1,6 +1,6 @@
 ```{r, setup, include=FALSE}
 knitr::opts_chunk$set(
-      fig.width = 12, fig.height = 12, dpi = 300, fig.path = "figures/pres-",
+      fig.width = 7, fig.height = 7, dpi = 300, fig.path = "figures/pres-",
       cache = TRUE
 )
 ```
@@ -34,6 +34,8 @@ clients <-
     per_male = sum(Sex == "Male") / size,
     per_blue_collar = sum(collar == "blue") / size,
     expected = sum(qx * FaceAmt),
+    actual_2021 = sum(FaceAmt[year == 2021], na.rm = TRUE),
+    ae_2021 = actual_2021 / (expected / 2),
     actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
     ae_2020 = actual_2020 / expected,
     actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
@@ -77,3 +79,16 @@ We now have our full dataset. Behold!
 ```{r}
 skim(clients)
 ```
+
+## How many were actually adverse?
+```{r}
+clients %>%
+  transmute(
+    `2019` = ae_2019 > 3,
+    `2020` = ae_2020 > 3,
+    `2021` = ae_2021 > 3) %>%
+  pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `ae > 3` = "TRUE", `ae < 3` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar()
+```
+
