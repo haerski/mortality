@@ -282,6 +282,15 @@ forest_tune <-
 
 forest_tune %>%
   show_best(metric = "roc_auc")
+
+# The best ones
+#    mtry min_n 
+#   <int> <int> 
+#      9    14 
+#      7     6 
+#      5     6 
+#      5    10 
+#      3     6 
 #############################
 ```
 
