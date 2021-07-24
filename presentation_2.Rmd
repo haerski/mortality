@@ -1,0 +1,109 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+      fig.width = 7, fig.height = 7, dpi = 300, fig.path = "figures/pres-",
+      cache = TRUE
+)
+```
+
+
+# Presentation 2 script
+
+## Data loading
+No need to talk about this.
+Please download the latest version of `data/simulation_data/all_persons.feather` from Google Drive.
+```{r message = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(ggbeeswarm)
+per <- read_feather("data/simulation_data/all_persons.feather")
+
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2021 = sum(FaceAmt[year == 2021], na.rm = TRUE),
+    ae_2021 = actual_2021 / (expected / 2),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+
+
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+
+
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+
+## How many were actually adverse?
+We count how many have AE > 1 in each year
+```{r}
+clients %>%
+  transmute(
+    `2019` = ae_2019 > 1,
+    `2020` = ae_2020 > 1,
+    `2021` = ae_2021 > 1) %>%
+  pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar() +
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
+```
+
+Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
+```{r}
+clients %>%
+  select(actual_2019, actual_2020, actual_2021) %>%
+  pivot_longer(actual_2019:actual_2021, names_to = "Year", values_to = "Claims") %>%
+  mutate(Year = str_sub(Year, 8)) %>%
+  filter(Claims > 0) %>%
+  ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
+  guides(color = FALSE) + labs(title = "Size of claims")
+  
+```
+
