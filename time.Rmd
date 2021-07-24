@@ -147,7 +147,7 @@ no_deaths <-
   clients %>%
   anti_join(per, by = "client") %>%
   select(client) %>%
-  mutate(yw = yearweek("2019 w01"), claims = 0)
+  mutate(yw = yearweek("2019 W01"), claims = 0)
 ```
 
 We compute face amount per week for each client. We also
@@ -180,5 +180,9 @@ weekly_data %<>%
   group_by(client) %>%
   mutate(rolling_ae = slide_index_dbl(claims, yw, sum, .before = 13) / (first(expected) / 4)) %>%
   relocate(rolling_ae, .before = size)
+```
+
+```{r}
+write_feather(weekly_data,"weeklydata.feather")
 ```
 

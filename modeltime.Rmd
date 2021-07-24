@@ -1,6 +1,4 @@
-# Baseline model
 
-The goal of this documents is to compare some tuned and untuned models on a "baseline" dataset. We want to predict whether AE in 2020 goes above 3. We are only using 2019 data here! Next steps will be adding time-dependent data (e.g. COVID deaths per week per zipcode).
 
 ## Common data
 ```{r}
@@ -54,7 +52,7 @@ Compute some summary statistic for each client.
               per_blue_collar = sum(collar == "blue") / size,
               ) %>%
     mutate(ae = actual / expect)%>%
-    mutate(adverse = ifelse(ae > 1.1, 1, 0),
+    mutate(adverse = ifelse(ae > 3.0, 1, 0),
     adverse = factor(adverse))%>%
     relocate(adverse, ae, .after = zip3)%>%
     ungroup()%>%
@@ -86,37 +84,13 @@ zip_data <-
     income = Median_Household_Income_2019
   )
 ```
-There seems to be some clients with some zip codes that we cannot deal with. These are the ones
-```{r}
-clients %>%
-  anti_join(zip_data, by = "zip3") %>%
-  select(zip3)
-```
-These correspond to the following areas
 
-ZIP3 | Area       |
------|------------|
-969  | Guam, Palau, Federated States of Micronesia, Northern Mariana Islands, Marshall Islands |
-093  | Military bases in Iraq and Afghanistan |
-732  | Not in use |
-872  | Not in use |
-004  | Not in use |
-202  | Washington DC, Government 1 |
-
-We ignore clients with these zip codes. There are also two clients in DC for which we're missing election data. We will ignore those as well.
 ```{r}
 clients %<>%
   inner_join(zip_data, by = "zip3") %>%
   drop_na()
 ```
 
-We now have our full dataset. Behold!
-```{r}
-skim(clients)
-```
-
-## Workflow set
-We'll evaluate models using a workflow set. To make our life easier, we will remove some variables and use a formula instead of a recipe.
 ```{r}
 clients<-
   clients %>%
@@ -124,7 +98,13 @@ clients<-
   mutate(zip3 = as.factor(zip3))%>%
   mutate(client = as.factor(client))%>%
   filter(year!=2019)
+  
 clients$date <- as.Date(with(clients, paste(year, month, day,sep="-")) , "%Y-%m-%d")
+
+clients <- 
+  clients%>%
+  relocate(date, .after = client)%>%
+  select(-day,-month,-year)
 
   #select(-client, -zip3, -ae_2020, -actual_2020, -actual_2019)
 ```
@@ -135,22 +115,80 @@ split
   splits <-  clients%>%time_series_split(initial = "6 months", assess = "6 months", cumulative = TRUE)
   train = training(splits)
   test = testing(splits)
-  crossval <- vfold_cv(training(splits), strata = ae)
+  crossval <- vfold_cv(training(splits), strata = zip3)
 ```
+#window forest
+It is not good 
+```{r}
+model_spec <- window_reg(
+        window_size     = 12,
+        id = "client"
+    ) %>%
+    # Extra parameters passed as: set_engine(...)
+    set_engine(
+        engine          = "window_function",
+        #window_function = median,
+        na.rm           = TRUE,
+        window_function = ~ tail(.x, 8),
+    )
+
+# Fit Spec
+model_fit <- model_spec %>%
+    fit(ae ~ ., data = train)
+model_fit
+predict(model_fit, testing(splits))
+
+model_tbl <- modeltime_table(
+    model_fit)
+
+model_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+
+```
+
+#Compare only one predictor(date) with all predictors(as before), the latter has better results.
+#XGboost have the best result among all 7 model.
+
 We now gather our recipes and models.
+#recipe
 ```{r}
 rec_obj <-
     recipe(ae ~ ., data = training(splits)) %>%
-    step_mutate(zip3 = droplevels(client)) %>%
+    step_mutate(client= droplevels(client)) %>%
     step_timeseries_signature(date) %>%
     step_rm(date) %>%
-    step_rm(year,month,day,zip3)%>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
     step_rm(adverse)%>%
     step_zv(all_predictors()) %>%
     step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
     step_normalize(all_predictors(), -all_nominal())
-```
-```{r}
+
 summary(prep(rec_obj))
 bake(prep(rec_obj),training(splits))
 ```
@@ -158,18 +196,8 @@ bake(prep(rec_obj),training(splits))
 recipes <- list(rec_obj)
 ```
 
-engine
+#engine
 ```{r}
-log_spec <-
-  logistic_reg() %>%
-  set_engine("glm") %>%
-  #set_mode("classification")
-  set_mode("unknown")
-tuned_log_spec <-
-  logistic_reg(penalty = 0.00118) %>%
-  set_engine("glmnet") %>%
-  #set_mode("classification")
-  set_mode("unknown")
 forest_spec <-
   rand_forest(trees = 1000) %>%
   #set_mode("classification") %>%
@@ -201,36 +229,14 @@ knn_spec <-
   set_engine("kknn") %>%
   #set_mode("classification")
   set_mode("regression")
-
-models <- list(log = log_spec,
-               logtuned = tuned_log_spec,
-               forest = forest_spec,
-               foresttuned = tuned_forest_spec,
-               neural = sln_spec,
-               svmrbf = svm_rbf_spec,
-               svmpoly = svm_poly_spec,
-               knnspec = knn_spec)
-```
-```{r}
-wflows <- workflow_set(recipes, models)
+xgboost_spec <-
+  boost_tree() %>%
+  set_engine("xgboost") %>%
+  #set_mode("classification")
+  set_mode("regression")
 ```
 
-
-```{r}
-wflw_log <- workflow() %>%
-    add_model(
-        log_spec
-    ) %>%
-    add_recipe(rec_obj) %>%
-    fit(training(splits))
-
-wflw_tunedlog <- workflow() %>%
-    add_model(
-        tuned_log_spec
-    ) %>%
-    add_recipe(rec_obj) %>%
-    fit(training(splits))
-```
+# workflow 
 ```{r}
 wflw_rf <- workflow() %>%
     add_model(
@@ -272,26 +278,30 @@ wflw_knnspec <- workflow() %>%
         knn_spec
     ) %>%
     add_recipe(rec_obj) %>%
-    fit(training(splits))               
+    fit(training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))  
 ```
 Create a Modeltime Table
 ```{r}
 model_tbl <- modeltime_table(
-    #wflw_log,
-    #wflw_tunedlog,
     wflw_rf,
     wflw_tunedrf,
     wflw_neural,
     wflw_svmrbf,
     wflw_svmpoly,
-    wflw_knnspec 
+    wflw_knnspec,
+    wflw_xgboost
 )
-
 model_tbl
 ```
 
-
-Calibrate by zip3
+#Calibrate by client
 ```{r}
 calib_tbl <- model_tbl %>%
     modeltime_calibrate(
@@ -304,11 +314,13 @@ calib_tbl
 
 Measure Accuracy
 ```{r}
+#global error
 calib_tbl %>% 
     modeltime_accuracy(acc_by_id = FALSE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
 ```
 ```{r}
+#local error for each client
 calib_tbl %>% 
     modeltime_accuracy(acc_by_id = TRUE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
@@ -345,16 +357,18 @@ residuals_tbl %>%
         .interactive = FALSE,
     )
 ```
+#all results
 ```{r}
-calib_tbl %>%
+result <- calib_tbl %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
     ) 
+result
 ```
 
-#only consider date
+#only consider one predictor: date
 split
 ```{r}
 #split
@@ -369,7 +383,7 @@ clients1 <- clients %>%
 ```{r}
 rec_obj <-
     recipe(ae ~ ., data = training(splits)) %>%
-    step_mutate(zip3 = droplevels(client)) %>%
+    step_mutate(client = droplevels(client)) %>%
     step_timeseries_signature(date) %>%
     step_rm(date) %>%
     step_rm(zip3)%>%
@@ -382,7 +396,7 @@ rec_obj <-
 summary(prep(rec_obj))
 bake(prep(rec_obj),training(splits))
 ```
-
+#workflow
 ```{r}
 wflw_rf <- workflow() %>%
     add_model(
@@ -424,24 +438,32 @@ wflw_knnspec <- workflow() %>%
         knn_spec
     ) %>%
     add_recipe(rec_obj) %>%
-    fit(training(splits))               
+    fit(training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))  
 ```
+
 Create a Modeltime Table
 ```{r}
 model_tbl <- modeltime_table(
-    #wflw_log,
-    #wflw_tunedlog,
     wflw_rf,
     wflw_tunedrf,
     wflw_neural,
     wflw_svmrbf,
     wflw_svmpoly,
-    wflw_knnspec 
+    wflw_knnspec,
+    wflw_xgboost
 )
 
 model_tbl
 ```
-Calibrate by zip3
+
+Calibrate by client
 ```{r}
 calib_tbl <- model_tbl %>%
     modeltime_calibrate(

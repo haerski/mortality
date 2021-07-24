@@ -1,0 +1,354 @@
+
+
+## Common data
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(timetk)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(dplyr)
+library(lubridate)
+```
+
+Get weeklydata from time.Rmd
+```{r}
+clients <-weekly_data %>%
+  mutate(year = year(yw))%>%
+  mutate(week = week(yw))
+
+clients$date <- as.Date(paste(clients$week, clients$year, 'Sun'), '%U %Y %a')
+clients <- 
+  clients%>%
+  relocate(date, .after = client)%>%
+  select(-yw,-week,-year)
+```
+```{r}
+clients<- clients%>%
+  drop_na()%>%
+  rename(ae = rolling_ae)%>%
+  select(-zip_deaths)
+```
+```{r}
+clients
+```
+```{r}
+write_feather(clients, "weeklydata.feather")
+```
+```{r}
+clients <-read_feather("weeklydata.feather")%>%
+  mutate(client = as.factor(client))%>%
+  filter(year(date)!=2019)%>%
+  distinct()
+```
+
+split
+```{r}
+#split
+  split
+  set.seed = 1234
+  splits <-  clients%>%time_series_split(initial = "6 months", assess = "6 months", cumulative = TRUE)
+  train = training(splits)
+  test = testing(splits)
+  #index <- unique(train$client)
+  #val <- sliding_index(training(splits), index)
+  
+  #crossval <- vfold_cv(training(splits), strata = zip3)
+```
+#window forest
+It is not good 
+```{r}
+model_spec <- window_reg(
+        window_size     = 12,
+        id = "client"
+    ) %>%
+    # Extra parameters passed as: set_engine(...)
+    set_engine(
+        engine          = "window_function",
+        #window_function = median,
+        na.rm           = TRUE,
+        window_function = ~ tail(.x, 8),
+    )
+
+# Fit Spec
+model_fit <- model_spec %>%
+    fit(ae ~ ., data = train)
+model_fit
+predict(model_fit, test)
+
+
+model_tbl <- modeltime_table(
+    model_fit)
+
+model_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+
+```
+
+#Compare only one predictor(date) with all predictors(as before), the latter has better results.
+#XGboost have the best result among all 7 model.
+
+We now gather our recipes and models.
+#recipe
+```{r}
+rec_obj <-
+    recipe(ae ~ ., data = training(splits)) %>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    #step_rm(adverse)%>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+    step_normalize(all_predictors(), -all_nominal())
+
+summary(prep(rec_obj))
+bake(prep(rec_obj),training(splits))
+```
+```{r}
+recipes <- list(rec_obj)
+```
+
+#engine
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+sln_spec <-
+  mlp() %>%
+  set_engine("nnet") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  #set_mode("classification")
+  set_mode("regression")
+xgboost_spec <-
+  boost_tree() %>%
+  set_engine("xgboost") %>%
+  #set_mode("classification")
+  set_mode("regression")
+```
+
+# workflow 
+```{r}
+#cannot fit
+wflw_neural <- workflow() %>%
+    add_model(
+        sln_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+```
+```{r}
+#take a lot time()
+wflw_svmpoly <- workflow() %>%
+    add_model(
+        svm_poly_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+```
+```{r}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+```
+Create a Modeltime Table
+```{r}
+model_tbl <- modeltime_table(
+    wflw_rf,
+    wflw_tunedrf,
+    #wflw_neural,
+    wflw_svmrbf,
+    #wflw_svmpoly,
+    wflw_knnspec,
+    wflw_xgboost
+)
+model_tbl
+```
+
+#Calibrate by client
+```{r}
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+
+calib_tbl
+```
+
+Measure Accuracy on validation data
+```{r}
+#global error
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+```{r}
+#local error for each client
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+validate the  Test Data
+conf_by_id : produce confidence interval estimates by an ID feature.
+#all results
+```{r}
+result <- calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+result
+```
+```{r}
+result %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+
+```{r}
+residuals_tbl <- calib_tbl  %>%
+    modeltime_calibrate(new_data = testing(splits)) %>%
+    modeltime_residuals()
+```
+```{r}
+residuals_tbl %>%
+    group_by(.model_id) %>%
+    #filter(.model_id == 5)%>%
+    plot_modeltime_residuals(
+        .type = "timeplot",
+        .interactive = FALSE,
+    )
+```
+
+```{r}
+choose_one_client<-testing(splits)%>% filter(client == "5")
+residuals_forclient <- calib_tbl  %>%
+    modeltime_calibrate(new_data = choose_one_client)%>%
+    modeltime_residuals()
+```
+```{r}
+residuals_forclient %>%
+    group_by(.model_id) %>%
+    #filter(.model_id == 5)%>%
+    plot_modeltime_residuals(
+        .type = "timeplot",
+        .interactive = FALSE
+    )
+residuals_forclient%>%
+  filter(.model_id == 5)%>%
+  ggplot( aes(x= .index)) +                    # basic graphical object
+  geom_line(aes(y=.residuals),color="red") +# first layer
+  geom_line(aes(y=.actual),color ="green") +
+  geom_line(aes(y=.prediction),color ="yellow")+
+  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
+
+residuals_forclient%>%
+  filter(.model_id == 3)%>%
+  ggplot( aes(x= .index)) +                    # basic graphical object
+  geom_line(aes(y=.residuals),color="red") +# first layer
+  geom_line(aes(y=.actual),color ="green") +
+  geom_line(aes(y=.prediction),color ="yellow")+
+  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
+```
+
+```{r}
+adversepred <- residuals_tbl%>%
+  mutate(obs =  ifelse(.actual > 3.0, "AE>3", "AE<3"))%>%
+  mutate(pred=  ifelse(.prediction > 3.0,"AE>3", "AE<3"))%>%
+  select(.model_id  ,.actual,.prediction,obs,pred)
+```
+
