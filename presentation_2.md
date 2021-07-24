@@ -16,6 +16,7 @@ library(feather)
 library(magrittr)
 library(skimr)
 library(vip)
+library(ggbeeswarm)
 per <- read_feather("data/simulation_data/all_persons.feather")
 
 clients <-
@@ -145,17 +146,38 @@ Table: Data summary
 |density         |         0|             1|         0.00|         0.00|       0.00|         0.00|         0.00|         0.00| 3.000000e-02|▇▁▁▁▁ |
 
 ## How many were actually adverse?
+We count how many have AE > 1 in each year
 
 ```r
 clients %>%
   transmute(
-    `2019` = ae_2019 > 3,
-    `2020` = ae_2020 > 3,
-    `2021` = ae_2021 > 3) %>%
+    `2019` = ae_2019 > 1,
+    `2020` = ae_2020 > 1,
+    `2021` = ae_2021 > 1) %>%
   pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
-  mutate(adverse = fct_rev(fct_recode(factor(adverse), `ae > 3` = "TRUE", `ae < 3` = "FALSE"))) %>%
-  ggplot(aes(x = year, fill = adverse)) + geom_bar()
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar() +
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
 ```
 
 ![plot of chunk unnamed-chunk-3](figures/pres-unnamed-chunk-3-1.png)
+
+Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
+
+```r
+clients %>%
+  select(actual_2019, actual_2020, actual_2021) %>%
+  pivot_longer(actual_2019:actual_2021, names_to = "Year", values_to = "Claims") %>%
+  mutate(Year = str_sub(Year, 8)) %>%
+  filter(Claims > 0) %>%
+  ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
+  guides(color = FALSE) + labs(title = "Size of claims")
+```
+
+```
+## Warning: `guides(<scale> = FALSE)` is deprecated. Please use
+## `guides(<scale> = "none")` instead.
+```
+
+![plot of chunk unnamed-chunk-4](figures/pres-unnamed-chunk-4-1.png)
 
