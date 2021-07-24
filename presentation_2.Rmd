@@ -21,6 +21,7 @@ library(magrittr)
 library(skimr)
 library(vip)
 library(ggbeeswarm)
+library(finetune)
 per <- read_feather("data/simulation_data/all_persons.feather")
 
 clients <-
@@ -196,3 +197,113 @@ fit_wflows %>%
 ```
 
 
+## Trying many models with many tuning parameters
+```{r}
+# tune_log_spec <-
+#   logistic_reg(penalty = tune()) %>%
+#   set_engine("glmnet") %>%
+#   set_mode("classification")
+# tune_forest_spec <-
+#   rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+#   set_mode("classification") %>%
+#   set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# # Samara's models
+# tune_sln_spec <-
+#   mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+#   set_engine("nnet") %>%
+#   set_mode("classification")
+# tune_svm_rbf_spec <-
+#   svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+#   set_engine("kernlab") %>%
+#   set_mode("classification")
+# # tune_svm_poly_spec <-
+# #   svm_poly() %>%
+# #   set_engine("kernlab") %>%
+# #   set_mode("classification")
+# tune_knn_spec <-
+#   nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
+#   set_engine("kknn") %>%
+#   set_mode("classification")
+# 
+# models <- list(log = tune_log_spec,
+#                forest = tune_forest_spec,
+#                sln = tune_sln_spec,
+#                svm = tune_svm_rbf_spec,
+#                knn = tune_knn_spec)
+# recipes <- list(no2019_rec)
+# wflows <- workflow_set(recipes, models)
+# 
+# # make a bigger grid!
+# # or use something like finetune!
+# results <-
+#   wflows %>%
+#   workflow_map(resamples = crossval,
+#                grid = 10,
+#                metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+#                control = control_grid(save_pred = TRUE),
+#                seed = 828282,
+#                verbose = TRUE)
+# 
+# autoplot(results)
+```
+
+
+## Tuning a forest using ANOVA racing
+TODO before knitting, remove the verbose option
+
+```{r collapse = TRUE}
+forest_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+
+forest_wflow <-
+  workflow() %>%
+  add_model(forest_spec) %>%
+  add_recipe(no2019_rec)
+
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1,20)))
+
+forest_grid <-
+  grid_regular(forest_params, levels = 10)
+
+#### NO NEED TO RUN THIS ####
+forest_tune <-
+  forest_wflow %>%
+  tune_race_anova(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc),
+      control = control_race(verbose = TRUE, verbose_elim = TRUE)
+  )
+
+forest_tune %>%
+  show_best(metric = "roc_auc")
+#############################
+```
+
+## This is our optimal, trained forest!
+```{r}
+best_params <- list(mtry = 3, min_n = 6)
+final_fit <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  last_fit(init)
+
+trained_wflow <-
+  final_fit %>%
+  extract_workflow()
+
+trained_recipe <-
+  trained_wflow %>%
+  extract_recipe(estimated = TRUE)
+```
+
+## Threshold the forest
+use library `probably`
+
+## Compute metrics
+Conf. matrix, accuracy, sens, spec, whatever you like
