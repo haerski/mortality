@@ -296,7 +296,7 @@ forest_tune %>%
 
 ## This is our optimal, trained forest!
 ```{r}
-best_params <- list(mtry = 3, min_n = 6)
+best_params <- list(mtry = 5, min_n = 6)
 final_fit <-
   forest_wflow %>%
   finalize_workflow(best_params) %>%
