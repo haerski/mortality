@@ -93,7 +93,8 @@ clients %>%
   pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
   mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
   ggplot(aes(x = year, fill = adverse)) + geom_bar() +
-  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")+
+  scale_fill_manual(values=c("yellow2","deepskyblue"))
 ```
 
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
@@ -104,7 +105,14 @@ clients %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
   ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
-  guides(color = FALSE) + labs(title = "Size of claims")
+  guides(color = FALSE) + labs(title = "Size of Actual claims")+
+  scale_color_manual(values=c("yellow3","deepskyblue", "black"))
+  
+```
+
+```{r}
+
+
 ```
 
 ## Trying many models with and without 2019 AE as a predictor
