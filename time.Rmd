@@ -19,6 +19,8 @@ library(magrittr)
 library(skimr)
 library(lubridate)
 library(tsibble)
+library(fable)
+library(feasts)
 library(glue)
 library(slider)
 per <- read_feather("data/simulation_data/all_persons.feather")
@@ -150,7 +152,7 @@ no_deaths <-
   mutate(yw = yearweek("2019 w01"), claims = 0)
 ```
 
-We compute face amount per week for each client. We also
+We compute face amount per week for each client. This number is 0 if the client has no deaths that week.
 ```{r}
 weekly_claims <-
   per %>%
@@ -174,11 +176,129 @@ weekly_data <-
   mutate(zip_deaths = replace_na(zip_deaths, 0))
 ```
 
-We add a rolling AE number. This will be the AE for the 13 week prior to that week.
+We add a rolling AE number. This will be the AE for the 26 week prior to that week.
+TODO: Early 2019 is a bit broken, we should remove it.
 ```{r}
 weekly_data %<>%
   group_by(client) %>%
-  mutate(rolling_ae = slide_index_dbl(claims, yw, sum, .before = 13) / (first(expected) / 4)) %>%
-  relocate(rolling_ae, .before = size)
+  mutate(rolling_ae = slide_index_dbl(claims, yw, sum, .before = 52, .complete = TRUE) / (first(expected) / 1)) %>%
+  relocate(rolling_ae, .before = size) %>%
+  ungroup() %>%
+  drop_na()
+```
+
+Let's see if this makes sense. We plot the rolling AE and deaths in the zip code for client 7.
+```{r}
+weekly_data %>%
+  filter(client == "7") %>%
+  ggplot(aes(x = yw)) + geom_line(aes(y = rolling_ae)) + geom_line(aes(y = zip_deaths), color = "red")
+```
+
+Cool. Let's make it into a `tsibble` (time series tibble)
+```{r}
+weekly_data %<>%
+  as_tsibble(key = client, index = yw)
+```
+
+
+
+## Some models
+We will throw some models at this data. We will start with a random forest.
+We will split the data with respect to time.
+We train on the past times.
+To predict, we first need to forecast `weekly_deaths`, and then use the model.
+
+Here is one way of forecasting with the `fable` package.
+```{r}
+weekly_data %>%
+  filter(client == 2, yw < yearweek("2021 w1")) %>%
+  model(arima = ARIMA(zip_deaths)) %>%
+  forecast(h = "3 months") %>%
+  autoplot(filter(weekly_data, year(yw) > 2019))
+```
+
+We will preprocess the data a little bit.
+```{r}
+forest_data <-
+  weekly_data %>%
+  mutate(class = fct_recode(factor(rolling_ae < 3), adverse = "FALSE", `not adverse` = "TRUE"), .after = yw) %>%
+  select(-rolling_ae)
+```
+
+Pick a training and validation set
+```{r}
+start <- yearweek("2020 w26")
+lookback <- 52
+end <- 26
+training <-
+  forest_data %>%
+  filter(yw <= start & yw > start - lookback)
+
+testing <-
+  forest_data %>%
+  filter(yw > start & yw <= start + end)
+```
+
+
+
+First let's do a random forest with default parameters
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+forest_recipe <-
+  recipe(class ~ ., data = training) %>%
+  # step_rm(client, zip3, yw, claims) %>%
+  step_rm(client, zip3, claims) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+forest_fit <-
+  forest_wf %>%
+  fit(training)
+```
+
+Now we estimate deaths for the next 6 weeks
+```{r}
+forecasted_deaths <-
+  training %>%
+  model(
+    # arima = ARIMA(zip_deaths ~ pdq() + PDQ(0,0,0)),
+    arima = ARIMA(zip_deaths),
+    # ets = ETS(zip_deaths ~ trend("A"))
+    # tslm = TSLM(zip_deaths ~ trend())
+  ) %>%
+  forecast(h = "6 months")
+
+forecasted_testing <-
+  forecasted_deaths %>%
+  as_tibble() %>%
+  select(client, yw, .mean) %>%
+  rename(zip_deaths = .mean) %>%
+  right_join( testing %>% select(-zip_deaths) )
+
+forest_fit %>%
+  predict(forecasted_testing, type = "prob") %>%
+  bind_cols(forecasted_testing) %>%
+  group_by(yw) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_adverse)) %>%
+  ggplot(aes(x = yw, y = roc_auc)) + geom_point() + geom_line()
+```
+
+Let's use the forecasts from IHME.
+... TODO
+
+
+Creating splits for each week
+```{r}
+forest_data %>%
+  arrange(yw) %>%
+  sliding_index(yw, lookback = 12, assess_stop = 26)
 ```
 
