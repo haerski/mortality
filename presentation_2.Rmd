@@ -100,22 +100,35 @@ clients %>%
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
 ```{r}
 clients %>%
-  select(actual_2019, actual_2020, actual_2021) %>%
-  pivot_longer(actual_2019:actual_2021, names_to = "Year", values_to = "Claims") %>%
+  select(expected, actual_2019, actual_2020, actual_2021) %>%
+  rename(actual_Expected=expected)%>%
+  pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
   ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
-  guides(color = FALSE) + labs(title = "Size of Actual claims")+
-  scale_color_manual(values=c("yellow3","deepskyblue", "black"))
-  
+  guides(color = "none") + labs(title = "Size of claims")+
+  scale_color_manual(values=c("yellow3","deepskyblue", "black", "red"))
 ```
 
 ```{r}
-
-
+ggplot(data) + 
+  geom_density(aes(x=log(actual2019)), fill="deepskyblue", alpha=0.5)+
+  geom_density(aes(x=log(expected)), fill="black", alpha=0.5)
+  #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
+  #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
+ # scale_y_continuous(name="Actual vs Expected Claims in 2019")
 ```
-
-## Trying many models with and without 2019 AE as a predictor
+```{r}
+ggplot(data) + 
+  geom_density(aes(x=log(actual2020)), fill="deepskyblue", alpha=0.5)+
+  geom_density(aes(x=log(expected)), fill="black", alpha=0.5)
+```
+```{r}
+ggplot(data) + 
+  geom_density(aes(x=log(actual2021)), fill="deepskyblue", alpha=0.5)+
+  geom_density(aes(x=log(expected)), fill="black", alpha=0.5)
+```
+##Trying many models with and without 2019 AE as a predictor
 
 ```{r}
 clients <-
@@ -205,6 +218,9 @@ fit_wflows %>%
 ```
 
 
+
+
+
 ## Trying many models with many tuning parameters
 ```{r}
 # tune_log_spec <-
@@ -254,6 +270,110 @@ fit_wflows %>%
 # 
 # autoplot(results)
 ```
+## This is our optimal, trained forest!
+
+
+```{r}
+best_params <- list(mtry = 5, min_n = 6)
+final_fit <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  last_fit(init, metrics=metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
+
+trained_wflow <-
+  final_fit %>%
+  extract_workflow()
+
+trained_recipe <-
+  trained_wflow %>%
+  extract_recipe(estimated = TRUE)
+```
+
+
+## Threshold the forest
+use library `probably`
+
+```{r choosing_bin_threshold}
+final_wflow <-
+  final_fit %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.5, 1, by = 0.01))))
+final_wflow %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+```
+
+## Compute metrics
+Conf. matrix, accuracy, sens, spec, whatever you like
+
+
+```{r}
+final_fit %>%
+  collect_metrics()
+
+
+final_pred <-
+  final_fit %>%
+  collect_predictions()
+```
+
+```{r}
+final_pred %>%
+	 conf_mat(adverse, .pred_class) %>%
+	 pluck(1) %>%
+	  as_tibble() %>%
+	  ggplot(aes(Prediction, Truth, alpha = n)) +
+	  geom_tile(show.legend = FALSE) +
+	  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
+```
+#SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
+
+```{r}
+library(treeshap)
+```
+
+```{r}
+clients$adverse <- ifelse(clients$adverse == "ae > 3",1,0)
+```
+
+```{r}
+model <- final_fit %>% 
+  extract_fit_engine()
+```
+
+
+
+```{r}
+test <- testing(init)
+test$adverse <- ifelse(test$adverse == "ae > 3",1,0)
+test
+```
+
+```{r}
+final_pred
+test
+test_pred <- merge((final_pred, test), 
+```
+
+```{r}
+model_unified <- ranger.unify(model, )
+```
+
+
+#autoplot(cm, type = "heatmap")
+
+```
+
+
+
+
+
+
+
 
 
 ## Tuning a forest using ANOVA racing
@@ -299,28 +419,6 @@ forest_tune %>%
 #      5     6 
 #      5    10 
 #      3     6 
-#############################
 ```
 
-## This is our optimal, trained forest!
-```{r}
-best_params <- list(mtry = 5, min_n = 6)
-final_fit <-
-  forest_wflow %>%
-  finalize_workflow(best_params) %>%
-  last_fit(init)
 
-trained_wflow <-
-  final_fit %>%
-  extract_workflow()
-
-trained_recipe <-
-  trained_wflow %>%
-  extract_recipe(estimated = TRUE)
-```
-
-## Threshold the forest
-use library `probably`
-
-## Compute metrics
-Conf. matrix, accuracy, sens, spec, whatever you like
