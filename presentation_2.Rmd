@@ -93,8 +93,8 @@ clients %>%
   pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
   mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
   ggplot(aes(x = year, fill = adverse)) + geom_bar() +
-  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")+
-  scale_fill_manual(values = c("yellow2", "deepskyblue"))
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
+  # scale_fill_manual(values = c("yellow2", "deepskyblue"))
 ```
 
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
@@ -105,28 +105,31 @@ clients %>%
   pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
-  ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(priority = "random") +
   guides(color = "none") + labs(title = "Size of claims") +
   scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
 ```
 
 ```{r}
 ggplot(clients) +
-  geom_density(aes(x = log(actual_2019)), fill = "deepskyblue", alpha = 0.5) +
-  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+  geom_density(aes(x = actual_2019), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
   #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
   #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
  # scale_y_continuous(name="Actual vs Expected Claims in 2019")
 ```
 ```{r}
 ggplot(clients) +
-  geom_density(aes(x = log(actual_2020)), fill = "deepskyblue", alpha = 0.5) +
-  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+  geom_density(aes(x = actual_2020), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
 ```
 ```{r}
 ggplot(clients) +
-  geom_density(aes(x = log(actual_2021)), fill = "deepskyblue", alpha = 0.5) +
-  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+  geom_density(aes(x = actual_2021), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
 ```
 ##Trying many models with and without 2019 AE as a predictor
 
