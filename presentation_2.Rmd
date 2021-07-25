@@ -94,39 +94,39 @@ clients %>%
   mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
   ggplot(aes(x = year, fill = adverse)) + geom_bar() +
   labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")+
-  scale_fill_manual(values=c("yellow2","deepskyblue"))
+  scale_fill_manual(values = c("yellow2", "deepskyblue"))
 ```
 
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
 ```{r}
 clients %>%
   select(expected, actual_2019, actual_2020, actual_2021) %>%
-  rename(actual_Expected=expected)%>%
+  rename(actual_Expected = expected) %>%
   pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
   ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
-  guides(color = "none") + labs(title = "Size of claims")+
-  scale_color_manual(values=c("yellow3","deepskyblue", "black", "red"))
+  guides(color = "none") + labs(title = "Size of claims") +
+  scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
 ```
 
 ```{r}
 ggplot(data) + 
-  geom_density(aes(x=log(actual2019)), fill="deepskyblue", alpha=0.5)+
-  geom_density(aes(x=log(expected)), fill="black", alpha=0.5)
+  geom_density(aes(x = log(actual2019)), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
   #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
   #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
  # scale_y_continuous(name="Actual vs Expected Claims in 2019")
 ```
 ```{r}
 ggplot(data) + 
-  geom_density(aes(x=log(actual2020)), fill="deepskyblue", alpha=0.5)+
-  geom_density(aes(x=log(expected)), fill="black", alpha=0.5)
+  geom_density(aes(x = log(actual2020)), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
 ```
 ```{r}
-ggplot(data) + 
-  geom_density(aes(x=log(actual2021)), fill="deepskyblue", alpha=0.5)+
-  geom_density(aes(x=log(expected)), fill="black", alpha=0.5)
+ggplot(data) +
+  geom_density(aes(x = log(actual2021)), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
 ```
 ##Trying many models with and without 2019 AE as a predictor
 
@@ -223,53 +223,92 @@ fit_wflows %>%
 
 ## Trying many models with many tuning parameters
 ```{r}
-# tune_log_spec <-
-#   logistic_reg(penalty = tune()) %>%
-#   set_engine("glmnet") %>%
-#   set_mode("classification")
-# tune_forest_spec <-
-#   rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
-#   set_mode("classification") %>%
-#   set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
-# # Samara's models
-# tune_sln_spec <-
-#   mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
-#   set_engine("nnet") %>%
-#   set_mode("classification")
-# tune_svm_rbf_spec <-
-#   svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+# tune_svm_poly_spec <-
+#   svm_poly() %>%
 #   set_engine("kernlab") %>%
 #   set_mode("classification")
-# # tune_svm_poly_spec <-
-# #   svm_poly() %>%
-# #   set_engine("kernlab") %>%
-# #   set_mode("classification")
-# tune_knn_spec <-
-#   nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
-#   set_engine("kknn") %>%
-#   set_mode("classification")
-# 
-# models <- list(log = tune_log_spec,
-#                forest = tune_forest_spec,
-#                sln = tune_sln_spec,
-#                svm = tune_svm_rbf_spec,
-#                knn = tune_knn_spec)
-# recipes <- list(no2019_rec)
-# wflows <- workflow_set(recipes, models)
-# 
-# # make a bigger grid!
-# # or use something like finetune!
-# results <-
-#   wflows %>%
-#   workflow_map(resamples = crossval,
-#                grid = 10,
-#                metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
-#                control = control_grid(save_pred = TRUE),
-#                seed = 828282,
-#                verbose = TRUE)
-# 
-# autoplot(results)
+tune_knn_spec <-
+  nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+models <- list(log = tune_log_spec,
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec,
+               knn = tune_knn_spec)
+recipes <- list(no2019_rec)
+wflows <- workflow_set(recipes, models)
 ```
+
+```{r}
+# make a bigger grid!
+# or use something like finetune!
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+```
+```{r}
+autoplot(results)
+```
+
+## Tuning a forest using ANOVA racing
+```{r collapse = TRUE}
+forest_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+
+forest_wflow <-
+  workflow() %>%
+  add_model(forest_spec) %>%
+  add_recipe(no2019_rec)
+
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1,20)))
+
+forest_grid <-
+  grid_regular(forest_params, levels = 100)
+```
+```{r}
+forest_tune <-
+  forest_wflow %>%
+  tune_race_anova(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc),
+      control = control_race(verbose = FALSE, verbose_elim = FALSE)
+  )
+```
+```{r}
+forest_tune %>%
+  show_best(metric = "roc_auc")
+```
+
 ## This is our optimal, trained forest!
 
 
@@ -278,7 +317,7 @@ best_params <- list(mtry = 5, min_n = 6)
 final_fit <-
   forest_wflow %>%
   finalize_workflow(best_params) %>%
-  last_fit(init, metrics=metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
+  last_fit(init, metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
 
 trained_wflow <-
   final_fit %>%
@@ -293,11 +332,12 @@ trained_recipe <-
 ## Threshold the forest
 use library `probably`
 
-```{r choosing_bin_threshold}
+```{r}
 final_wflow <-
   final_fit %>%
   rowwise() %>%
-  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.5, 1, by = 0.01))))
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
+
 final_wflow %>%
   select(thr_perf, id) %>%
   unnest(thr_perf) %>%
@@ -323,102 +363,52 @@ final_pred <-
 
 ```{r}
 final_pred %>%
-	 conf_mat(adverse, .pred_class) %>%
-	 pluck(1) %>%
-	  as_tibble() %>%
-	  ggplot(aes(Prediction, Truth, alpha = n)) +
-	  geom_tile(show.legend = FALSE) +
-	  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
+  conf_mat(adverse, .pred_class) %>%
+  pluck(1) %>%
+  as_tibble() %>%
+  ggplot(aes(Prediction, Truth, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
 ```
+
 #SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
 
 ```{r}
 library(treeshap)
 ```
 
-```{r}
-clients$adverse <- ifelse(clients$adverse == "ae > 3",1,0)
+```{r eval = FALSE}
+clients$adverse <- ifelse(clients$adverse == "ae > 3", 1, 0)
 ```
 
-```{r}
-model <- final_fit %>% 
+```{r eval = FALSE}
+model <- final_fit %>%
   extract_fit_engine()
 ```
 
 
 
-```{r}
+```{r eval = FALSE}
 test <- testing(init)
-test$adverse <- ifelse(test$adverse == "ae > 3",1,0)
+test$adverse <- ifelse(test$adverse == "ae > 3", 1, 0)
 test
 ```
 
-```{r}
+```{r eval = FALSE}
 final_pred
 test
 test_pred <- merge((final_pred, test), 
 ```
 
-```{r}
+```{r eval = FALSE}
 model_unified <- ranger.unify(model, )
 ```
 
 
 #autoplot(cm, type = "heatmap")
 
-```
 
 
 
-
-
-
-
-
-
-## Tuning a forest using ANOVA racing
-TODO before knitting, remove the verbose option
-
-```{r collapse = TRUE}
-forest_spec <-
-  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
-  set_mode("classification") %>%
-  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
-
-forest_wflow <-
-  workflow() %>%
-  add_model(forest_spec) %>%
-  add_recipe(no2019_rec)
-
-forest_params <-
-  forest_wflow %>%
-  parameters() %>%
-  update(mtry = mtry(c(1,20)))
-
-forest_grid <-
-  grid_regular(forest_params, levels = 10)
-
-#### NO NEED TO RUN THIS ####
-forest_tune <-
-  forest_wflow %>%
-  tune_race_anova(
-      resamples = crossval,
-      grid = forest_grid,
-      metrics = metric_set(roc_auc),
-      control = control_race(verbose = TRUE, verbose_elim = TRUE)
-  )
-
-forest_tune %>%
-  show_best(metric = "roc_auc")
-
-# The best ones
-#    mtry min_n 
-#   <int> <int> 
-#      9    14 
-#      7     6 
-#      5     6 
-#      5    10 
-#      3     6 
-```
 
 

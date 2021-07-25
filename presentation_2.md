@@ -17,6 +17,7 @@ library(magrittr)
 library(skimr)
 library(vip)
 library(ggbeeswarm)
+library(finetune)
 per <- read_feather("data/simulation_data/all_persons.feather")
 
 clients <-
@@ -157,7 +158,8 @@ clients %>%
   pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
   mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
   ggplot(aes(x = year, fill = adverse)) + geom_bar() +
-  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")+
+  scale_fill_manual(values = c("yellow2", "deepskyblue"))
 ```
 
 ![plot of chunk unnamed-chunk-3](figures/pres-unnamed-chunk-3-1.png)
@@ -166,22 +168,58 @@ Changes in actual claims from 2019 to 2021. Here each point is a company. Note t
 
 ```r
 clients %>%
-  select(actual_2019, actual_2020, actual_2021) %>%
-  pivot_longer(actual_2019:actual_2021, names_to = "Year", values_to = "Claims") %>%
+  select(expected, actual_2019, actual_2020, actual_2021) %>%
+  rename(actual_Expected = expected) %>%
+  pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
   ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
-  guides(color = FALSE) + labs(title = "Size of claims")
-```
-
-```
-## Warning: `guides(<scale> = FALSE)` is deprecated. Please use
-## `guides(<scale> = "none")` instead.
+  guides(color = "none") + labs(title = "Size of claims") +
+  scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
 ```
 
 ![plot of chunk unnamed-chunk-4](figures/pres-unnamed-chunk-4-1.png)
 
-## Trying many models with and without 2019 AE as a predictor
+
+```r
+ggplot(data) + 
+  geom_density(aes(x = log(actual2019)), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+```
+
+```
+## Error:   You're passing a function as global data.
+##   Have you misspelled the `data` argument in `ggplot()`
+```
+
+```r
+  #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
+  #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
+ # scale_y_continuous(name="Actual vs Expected Claims in 2019")
+```
+
+```r
+ggplot(data) + 
+  geom_density(aes(x = log(actual2020)), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+```
+
+```
+## Error:   You're passing a function as global data.
+##   Have you misspelled the `data` argument in `ggplot()`
+```
+
+```r
+ggplot(data) +
+  geom_density(aes(x = log(actual2021)), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+```
+
+```
+## Error:   You're passing a function as global data.
+##   Have you misspelled the `data` argument in `ggplot()`
+```
+##Trying many models with and without 2019 AE as a predictor
 
 
 ```r
@@ -263,37 +301,37 @@ fit_wflows <-
                metrics = metric_set(roc_auc, sens, accuracy),
                verbose = TRUE)
 ## i  1 of 16 resampling: with2019ae_log
-## ✔  1 of 16 resampling: with2019ae_log (5.4s)
+## ✔  1 of 16 resampling: with2019ae_log (3.7s)
 ## i  2 of 16 resampling: with2019ae_logtuned
-## ✔  2 of 16 resampling: with2019ae_logtuned (5.7s)
+## ✔  2 of 16 resampling: with2019ae_logtuned (4.3s)
 ## i  3 of 16 resampling: with2019ae_forest
-## ✔  3 of 16 resampling: with2019ae_forest (7s)
+## ✔  3 of 16 resampling: with2019ae_forest (5.1s)
 ## i  4 of 16 resampling: with2019ae_foresttuned
-## ✔  4 of 16 resampling: with2019ae_foresttuned (8.3s)
+## ✔  4 of 16 resampling: with2019ae_foresttuned (5.6s)
 ## i  5 of 16 resampling: with2019ae_neural
-## ✔  5 of 16 resampling: with2019ae_neural (6.3s)
+## ✔  5 of 16 resampling: with2019ae_neural (4s)
 ## i  6 of 16 resampling: with2019ae_svmrbf
-## ✔  6 of 16 resampling: with2019ae_svmrbf (6.7s)
+## ✔  6 of 16 resampling: with2019ae_svmrbf (4.8s)
 ## i  7 of 16 resampling: with2019ae_svmpoly
-## ✔  7 of 16 resampling: with2019ae_svmpoly (6.8s)
+## ✔  7 of 16 resampling: with2019ae_svmpoly (4.2s)
 ## i  8 of 16 resampling: with2019ae_knnspec
-## ✔  8 of 16 resampling: with2019ae_knnspec (6.3s)
+## ✔  8 of 16 resampling: with2019ae_knnspec (3.9s)
 ## i  9 of 16 resampling: no2019ae_log
-## ✔  9 of 16 resampling: no2019ae_log (6.3s)
+## ✔  9 of 16 resampling: no2019ae_log (3.9s)
 ## i 10 of 16 resampling: no2019ae_logtuned
-## ✔ 10 of 16 resampling: no2019ae_logtuned (6.5s)
+## ✔ 10 of 16 resampling: no2019ae_logtuned (4.1s)
 ## i 11 of 16 resampling: no2019ae_forest
-## ✔ 11 of 16 resampling: no2019ae_forest (7.8s)
+## ✔ 11 of 16 resampling: no2019ae_forest (5s)
 ## i 12 of 16 resampling: no2019ae_foresttuned
-## ✔ 12 of 16 resampling: no2019ae_foresttuned (8.5s)
+## ✔ 12 of 16 resampling: no2019ae_foresttuned (5.8s)
 ## i 13 of 16 resampling: no2019ae_neural
-## ✔ 13 of 16 resampling: no2019ae_neural (6.5s)
+## ✔ 13 of 16 resampling: no2019ae_neural (4.1s)
 ## i 14 of 16 resampling: no2019ae_svmrbf
-## ✔ 14 of 16 resampling: no2019ae_svmrbf (6.9s)
+## ✔ 14 of 16 resampling: no2019ae_svmrbf (4.3s)
 ## i 15 of 16 resampling: no2019ae_svmpoly
-## ✔ 15 of 16 resampling: no2019ae_svmpoly (7.2s)
+## ✔ 15 of 16 resampling: no2019ae_svmpoly (4.3s)
 ## i 16 of 16 resampling: no2019ae_knnspec
-## ✔ 16 of 16 resampling: no2019ae_knnspec (6.6s)
+## ✔ 16 of 16 resampling: no2019ae_knnspec (4.1s)
 
 fit_wflows %>%
   collect_metrics() %>%
@@ -304,6 +342,266 @@ fit_wflows %>%
   labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
 ```
 
-![plot of chunk unnamed-chunk-6](figures/pres-unnamed-chunk-6-1.png)
+![plot of chunk unnamed-chunk-9](figures/pres-unnamed-chunk-9-1.png)
+
+
+
+
+
+## Trying many models with many tuning parameters
+
+```r
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+# tune_svm_poly_spec <-
+#   svm_poly() %>%
+#   set_engine("kernlab") %>%
+#   set_mode("classification")
+tune_knn_spec <-
+  nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+models <- list(log = tune_log_spec,
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec,
+               knn = tune_knn_spec)
+recipes <- list(no2019_rec)
+wflows <- workflow_set(recipes, models)
+```
+
+
+```r
+# make a bigger grid!
+# or use something like finetune!
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+```
+
+```
+## i 1 of 5 tuning:     recipe_log
+```
+
+```
+## Timing stopped at: 4.543 0.22 4.765
+```
+
+```
+## Execution stepped; returning current results
+```
+
+```r
+autoplot(results)
+```
+
+```
+## Error: There were 5 workflows that had no results.
+```
+
+## Tuning a forest using ANOVA racing
+
+```r
+forest_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+
+forest_wflow <-
+  workflow() %>%
+  add_model(forest_spec) %>%
+  add_recipe(no2019_rec)
+
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1,20)))
+
+forest_grid <-
+  grid_regular(forest_params, levels = 100)
+```
+
+```r
+forest_tune <-
+  forest_wflow %>%
+  tune_race_anova(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc),
+      control = control_race(verbose = FALSE, verbose_elim = FALSE)
+  )
+```
+
+```r
+forest_tune %>%
+  show_best(metric = "roc_auc")
+```
+
+```
+## # A tibble: 5 x 8
+##    mtry min_n .metric .estimator  mean     n std_err .config              
+##   <int> <int> <chr>   <chr>      <dbl> <int>   <dbl> <chr>                
+## 1     4     2 roc_auc binary     0.858    10  0.0175 Preprocessor1_Model0…
+## 2     4     8 roc_auc binary     0.857    10  0.0170 Preprocessor1_Model1…
+## 3     9    14 roc_auc binary     0.857    10  0.0182 Preprocessor1_Model2…
+## 4     5     7 roc_auc binary     0.857    10  0.0171 Preprocessor1_Model1…
+## 5     7     9 roc_auc binary     0.857    10  0.0170 Preprocessor1_Model1…
+```
+
+## This is our optimal, trained forest!
+
+
+
+```r
+best_params <- list(mtry = 5, min_n = 6)
+final_fit <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  last_fit(init, metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
+
+trained_wflow <-
+  final_fit %>%
+  extract_workflow()
+
+trained_recipe <-
+  trained_wflow %>%
+  extract_recipe(estimated = TRUE)
+```
+
+
+## Threshold the forest
+use library `probably`
+
+
+```r
+final_wflow <-
+  final_fit %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
+
+final_wflow %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+```
+
+```
+## `summarise()` has grouped output by '.threshold'. You can override using the `.groups` argument.
+```
+
+![plot of chunk unnamed-chunk-17](figures/pres-unnamed-chunk-17-1.png)
+
+## Compute metrics
+Conf. matrix, accuracy, sens, spec, whatever you like
+
+
+
+```r
+final_fit %>%
+  collect_metrics()
+```
+
+```
+## # A tibble: 8 x 4
+##   .metric   .estimator .estimate .config             
+##   <chr>     <chr>          <dbl> <chr>               
+## 1 accuracy  binary         0.855 Preprocessor1_Model1
+## 2 sens      binary         0.924 Preprocessor1_Model1
+## 3 spec      binary         0.656 Preprocessor1_Model1
+## 4 ppv       binary         0.885 Preprocessor1_Model1
+## 5 npv       binary         0.75  Preprocessor1_Model1
+## 6 precision binary         0.885 Preprocessor1_Model1
+## 7 recall    binary         0.924 Preprocessor1_Model1
+## 8 roc_auc   binary         0.862 Preprocessor1_Model1
+```
+
+```r
+final_pred <-
+  final_fit %>%
+  collect_predictions()
+```
+
+
+```r
+final_pred %>%
+  conf_mat(adverse, .pred_class) %>%
+  pluck(1) %>%
+  as_tibble() %>%
+  ggplot(aes(Prediction, Truth, alpha = n)) +
+  geom_tile(show.legend = FALSE) +
+  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
+```
+
+![plot of chunk unnamed-chunk-19](figures/pres-unnamed-chunk-19-1.png)
+
+#SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
+
+
+```r
+library(treeshap)
+```
+
+
+```r
+clients$adverse <- ifelse(clients$adverse == "ae > 3", 1, 0)
+```
+
+
+```r
+model <- final_fit %>%
+  extract_fit_engine()
+```
+
+
+
+
+```r
+test <- testing(init)
+test$adverse <- ifelse(test$adverse == "ae > 3", 1, 0)
+test
+```
+
+
+```r
+final_pred
+test
+test_pred <- merge((final_pred, test), 
+```
+
+
+```r
+model_unified <- ranger.unify(model, )
+```
+
+
+#autoplot(cm, type = "heatmap")
+
+
+
+
 
 
