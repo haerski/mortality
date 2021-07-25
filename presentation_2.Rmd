@@ -1,7 +1,6 @@
 ```{r, setup, include=FALSE}
 knitr::opts_chunk$set(
-      fig.width = 7, fig.height = 7, dpi = 300, fig.path = "figures/pres-",
-      cache = TRUE
+      fig.width = 5, fig.height = 5, dpi = 300, fig.path = "figures/pres-"
 )
 ```
 
@@ -203,7 +202,7 @@ set.seed(30308)
 crossval <- vfold_cv(training(init), strata = adverse)
 ```
 
-```{r collapse = TRUE}
+```{r collapse = TRUE, cache = TRUE}
 fit_wflows <-
   wflows %>%
   workflow_map(fn = "fit_resamples",
@@ -263,14 +262,14 @@ recipes <- list(no2019_rec)
 wflows <- workflow_set(recipes, models)
 ```
 
-```{r}
+```{r cache = TRUE, collapse = TRUE}
 # make a bigger grid!
 # or use something like finetune!
 results <-
   wflows %>%
   workflow_map(resamples = crossval,
                grid = 10,
-               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               metrics = metric_set(roc_auc, accuracy),
                control = control_grid(save_pred = TRUE),
                seed = 828282,
                verbose = TRUE)
@@ -307,30 +306,74 @@ forest_params <-
 forest_grid <-
   grid_regular(forest_params, levels = 10)
 ```
-```{r}
+```{r cache = TRUE, collapse = TRUE}
 forest_tune <-
   forest_wflow %>%
-  tune_grid(
+  tune_race_anova(
       resamples = crossval,
       grid = forest_grid,
       metrics = metric_set(roc_auc, accuracy),
-      control = control_race(verbose = TRUE, verbose_elim = TRUE)
+      control = control_race(verbose = FALSE, verbose_elim = TRUE)
   )
 ```
 ```{r}
 forest_tune %>%
   show_best(metric = "roc_auc")
+
+autoplot(forest_tune)
+plot_race(forest_tune)
 ```
 
-## This is our optimal, trained forest!
+## These are our optimal parameters
 
 
 ```{r}
 best_params <- list(mtry = 5, min_n = 6)
+```
+
+## Threshold the forest
+
+use library `probably`
+
+```{r}
+forest_resamples <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  fit_resamples(
+      resamples = crossval,
+      control = control_resamples(save_pred = TRUE)
+  )
+
+forest_resamples %>%
+  select(.predictions) %>%
+  unnest(.predictions) %>%
+  roc_curve(adverse, `.pred_ae > 3`) %>%
+  autoplot()
+
+forest_resamples <-
+  forest_resamples %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
+
+
+
+forest_resamples %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+```
+
+We select ... as our final threshold
+
+## This is our final model !!!
+```{r}
 final_fit <-
   forest_wflow %>%
   finalize_workflow(best_params) %>%
-  last_fit(init, metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
+  last_fit(init)
 
 trained_wflow <-
   final_fit %>%
@@ -342,28 +385,11 @@ trained_recipe <-
 ```
 
 
-## Threshold the forest
-use library `probably`
-
-```{r}
-final_wflow <-
-  final_fit %>%
-  rowwise() %>%
-  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
-
-final_wflow %>%
-  select(thr_perf, id) %>%
-  unnest(thr_perf) %>%
-  group_by(.threshold, .metric) %>%
-  summarize(estimate = mean(.estimate)) %>%
-  filter(.metric != "distance") %>%
-  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
-```
-
-## Compute metrics
+## Apply chosen threshold and compute metrics
+Use `probably` to apply threshold.
 Conf. matrix, accuracy, sens, spec, whatever you like
 
-
+Below is not yet using thresholds!!!!
 ```{r}
 final_fit %>%
   collect_metrics()
