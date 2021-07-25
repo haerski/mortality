@@ -426,6 +426,10 @@ confusion_matrix %>% summary()
 fulltest <- testing(init)
 fulltrain <- training(init)
 ```
+```{r}
+fulltrain %>% slice (343)
+fulltest%>% slice(80)
+```
 
 ```{r eval = FALSE}
 library(DALEX)
@@ -444,50 +448,77 @@ ex %>%
 fit_parsnip %>% predict(train %>% slice(343), type = "prob")
 ```
 
-```{r}
-shap <- predict_parts(explainer = ex, 
-                      new_observation = train%>%slice(343), 
-                                 type = "shap",
-                                  B = 25)
-                               
-```
+```{r eval = FALSE}
+library(DALEX)
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
 
-```{r}
+ex %>%
+  predict_parts(test %>% slice(80)) %>%
+  plot()
+
+fit_parsnip %>% predict(test %>% slice(80), type = "prob")
+```
+```{r eval = FALSE}
+shap <- predict_parts(explainer = ex, 
+                      new_observation = train %>%slice(343), 
+                                 type = "break_down"
+                                  )
+                               
 plot(shap,show_boxplots = FALSE)
 ```
 
-```{r eval = FALSE}
-library(treeshap)
+```{r}
+shap <- predict_parts(explainer = ex, 
+                      new_observation = test %>%slice(80), 
+                                 type = "break_down")
 ```
 
-```{r eval = FALSE}
-clients$adverse <- ifelse(clients$adverse == "ae > 3", 1, 0)
+```{r}
+shap%>%
+  mutate(contribution = - contribution)%>%
+  plot()
+```
+```{r}
+                               
+plot(shap,show_boxplots = FALSE)
+```
+#FOr first one 
+```{r}
+shap <- predict_parts(explainer = ex, 
+                      new_observation = train, 
+                                 type = "shap",
+                                  B = 25,
+                                  N = 400)
+                               
+plot(shap,show_boxplots = FALSE)
 ```
 
-```{r eval = FALSE}
-model <- final_fit %>%
-  extract_fit_engine()
+```{r}
+shap <- predict_parts(explainer = ex, 
+                      new_observation = train %>%slice(343), 
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap,show_boxplots = FALSE)
+```
+```{r}
+shap <- predict_parts(explainer = ex, 
+                      new_observation = test %>%slice(80), 
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap,show_boxplots = FALSE)
 ```
 
-
-
-```{r eval = FALSE}
-test <- testing(init)
-test$adverse <- ifelse(test$adverse == "ae > 3", 1, 0)
-test
+```{r}
+vip(fit_parsnip, fill = hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE) )
 ```
-
-```{r eval = FALSE}
-final_pred
-test
-test_pred <- merge((final_pred, test), 
+```{r}
+hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE)
 ```
-
-```{r eval = FALSE}
-model_unified <- ranger.unify(model, )
-```
-
-
-#autoplot(cm, type = "heatmap")
-
-
