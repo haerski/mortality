@@ -133,13 +133,14 @@ ggplot(clients) +
 ```{r}
 clients <-
   clients %>%
-  select(-client, -zip3,
+  select(
          -ae_2020, -ae_2021, -actual_2020, -actual_2019, -actual_2021,
          -hes, -hes_uns, -str_hes)
 
 
 with2019_rec <-
   recipe(adverse ~ ., data = clients) %>%
+  update_role(zip3, client, new_role = "ID") %>%
   step_zv(all_predictors()) %>%
   step_normalize(all_predictors(), -all_nominal())
 no2019_rec <-
@@ -191,7 +192,8 @@ models <- list(log = log_spec,
 recipes <- list("with2019ae" = with2019_rec,
                 "no2019ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
-
+```
+```{r}
 set.seed(30308)
 init <- initial_split(clients, strata = adverse)
 set.seed(30308)
@@ -286,6 +288,7 @@ forest_spec <-
 forest_rec <-
   recipe(adverse ~ ., data = clients) %>%
   step_rm(ae_2019) %>%
+  update_role(client, zip3, new_role = "ID") %>%
   step_zv(all_predictors())
 
 forest_wflow <-
@@ -380,20 +383,10 @@ final_pred %>%
 
 #SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
 
-We need the target variable to be numeric...
-```{r eval = FALSE}
-train <- training(init) %>% mutate(adverse = if_else(adverse == "ae > 3", 1, 0))
-test <- testing(init) %>% mutate(adverse = if_else(adverse == "ae > 3", 1, 0))
-
-shap_fit_forest <-
-  forest_wflow %>%
-  finalize_workflow(best_params)
-
-  set_mode("regression") %>%
-  fit(train)
+```{r}
+fulltest <- testing(init)
+fulltrain <- training(init)
 ```
-
-
 
 ```{r eval = FALSE}
 library(DALEX)
@@ -406,10 +399,23 @@ ex <-
     data = train)
 
 ex %>%
-  predict_parts(test %>% slice(1)) %>%
+  predict_parts(train %>% slice(343)) %>%
   plot()
+
+fit_parsnip %>% predict(train %>% slice(343), type = "prob")
 ```
 
+```{r}
+shap <- predict_parts(explainer = ex, 
+                      new_observation = train%>%slice(343), 
+                                 type = "shap",
+                                  B = 25)
+                               
+```
+
+```{r}
+plot(shap,show_boxplots = FALSE)
+```
 
 ```{r eval = FALSE}
 library(treeshap)
