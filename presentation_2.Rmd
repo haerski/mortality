@@ -111,21 +111,21 @@ clients %>%
 ```
 
 ```{r}
-ggplot(data) + 
-  geom_density(aes(x = log(actual2019)), fill = "deepskyblue", alpha = 0.5) +
+ggplot(clients) +
+  geom_density(aes(x = log(actual_2019)), fill = "deepskyblue", alpha = 0.5) +
   geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
   #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
   #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
  # scale_y_continuous(name="Actual vs Expected Claims in 2019")
 ```
 ```{r}
-ggplot(data) + 
-  geom_density(aes(x = log(actual2020)), fill = "deepskyblue", alpha = 0.5) +
+ggplot(clients) +
+  geom_density(aes(x = log(actual_2020)), fill = "deepskyblue", alpha = 0.5) +
   geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
 ```
 ```{r}
-ggplot(data) +
-  geom_density(aes(x = log(actual2021)), fill = "deepskyblue", alpha = 0.5) +
+ggplot(clients) +
+  geom_density(aes(x = log(actual_2021)), fill = "deepskyblue", alpha = 0.5) +
   geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
 ```
 ##Trying many models with and without 2019 AE as a predictor
@@ -274,12 +274,19 @@ results <-
 autoplot(results)
 ```
 
-## Tuning a forest using ANOVA racing
+## Tuning a forest
+
+We don't need to normalize the predictors
 ```{r collapse = TRUE}
 forest_spec <-
   rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
   set_mode("classification") %>%
   set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+
+forest_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  step_zv(all_predictors())
 
 forest_wflow <-
   workflow() %>%
@@ -289,19 +296,19 @@ forest_wflow <-
 forest_params <-
   forest_wflow %>%
   parameters() %>%
-  update(mtry = mtry(c(1,20)))
+  update(mtry = mtry(c(1, 20)))
 
 forest_grid <-
-  grid_regular(forest_params, levels = 100)
+  grid_regular(forest_params, levels = 10)
 ```
 ```{r}
 forest_tune <-
   forest_wflow %>%
-  tune_race_anova(
+  tune_grid(
       resamples = crossval,
       grid = forest_grid,
-      metrics = metric_set(roc_auc),
-      control = control_race(verbose = FALSE, verbose_elim = FALSE)
+      metrics = metric_set(roc_auc, accuracy),
+      control = control_race(verbose = TRUE, verbose_elim = TRUE)
   )
 ```
 ```{r}
@@ -373,7 +380,38 @@ final_pred %>%
 
 #SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
 
-```{r}
+We need the target variable to be numeric...
+```{r eval = FALSE}
+train <- training(init) %>% mutate(adverse = if_else(adverse == "ae > 3", 1, 0))
+test <- testing(init) %>% mutate(adverse = if_else(adverse == "ae > 3", 1, 0))
+
+shap_fit_forest <-
+  forest_wflow %>%
+  finalize_workflow(best_params)
+
+  set_mode("regression") %>%
+  fit(train)
+```
+
+
+
+```{r eval = FALSE}
+library(DALEX)
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+
+ex %>%
+  predict_parts(test %>% slice(1)) %>%
+  plot()
+```
+
+
+```{r eval = FALSE}
 library(treeshap)
 ```
 
@@ -406,9 +444,5 @@ model_unified <- ranger.unify(model, )
 
 
 #autoplot(cm, type = "heatmap")
-
-
-
-
 
 
