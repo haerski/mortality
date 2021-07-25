@@ -181,3 +181,129 @@ clients %>%
 
 ![plot of chunk unnamed-chunk-4](figures/pres-unnamed-chunk-4-1.png)
 
+## Trying many models with and without 2019 AE as a predictor
+
+
+```r
+clients <-
+  clients %>%
+  select(-client, -zip3,
+         -ae_2020, -ae_2021, -actual_2020, -actual_2019, -actual_2021,
+         -hes, -hes_uns, -str_hes)
+
+
+with2019_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors(), -all_nominal())
+no2019_rec <-
+  with2019_rec %>%
+  step_rm(ae_2019)
+
+log_spec <-
+  logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+tuned_log_spec <-
+  logistic_reg(penalty = 0.00118) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+sln_spec <-
+  mlp() %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+models <- list(log = log_spec,
+               logtuned = tuned_log_spec,
+               forest = forest_spec,
+               foresttuned = tuned_forest_spec,
+               neural = sln_spec,
+               svmrbf = svm_rbf_spec,
+               svmpoly = svm_poly_spec,
+               knnspec = knn_spec)
+recipes <- list("with2019ae" = with2019_rec,
+                "no2019ae" = no2019_rec)
+wflows <- workflow_set(recipes, models)
+
+set.seed(30308)
+init <- initial_split(clients, strata = adverse)
+set.seed(30308)
+crossval <- vfold_cv(training(init), strata = adverse)
+```
+
+
+```r
+fit_wflows <-
+  wflows %>%
+  workflow_map(fn = "fit_resamples",
+               seed = 30332,
+               resamples = crossval,
+               control = control_resamples(save_pred = TRUE),
+               metrics = metric_set(roc_auc, sens, accuracy),
+               verbose = TRUE)
+## i  1 of 16 resampling: with2019ae_log
+## ✔  1 of 16 resampling: with2019ae_log (5.4s)
+## i  2 of 16 resampling: with2019ae_logtuned
+## ✔  2 of 16 resampling: with2019ae_logtuned (5.7s)
+## i  3 of 16 resampling: with2019ae_forest
+## ✔  3 of 16 resampling: with2019ae_forest (7s)
+## i  4 of 16 resampling: with2019ae_foresttuned
+## ✔  4 of 16 resampling: with2019ae_foresttuned (8.3s)
+## i  5 of 16 resampling: with2019ae_neural
+## ✔  5 of 16 resampling: with2019ae_neural (6.3s)
+## i  6 of 16 resampling: with2019ae_svmrbf
+## ✔  6 of 16 resampling: with2019ae_svmrbf (6.7s)
+## i  7 of 16 resampling: with2019ae_svmpoly
+## ✔  7 of 16 resampling: with2019ae_svmpoly (6.8s)
+## i  8 of 16 resampling: with2019ae_knnspec
+## ✔  8 of 16 resampling: with2019ae_knnspec (6.3s)
+## i  9 of 16 resampling: no2019ae_log
+## ✔  9 of 16 resampling: no2019ae_log (6.3s)
+## i 10 of 16 resampling: no2019ae_logtuned
+## ✔ 10 of 16 resampling: no2019ae_logtuned (6.5s)
+## i 11 of 16 resampling: no2019ae_forest
+## ✔ 11 of 16 resampling: no2019ae_forest (7.8s)
+## i 12 of 16 resampling: no2019ae_foresttuned
+## ✔ 12 of 16 resampling: no2019ae_foresttuned (8.5s)
+## i 13 of 16 resampling: no2019ae_neural
+## ✔ 13 of 16 resampling: no2019ae_neural (6.5s)
+## i 14 of 16 resampling: no2019ae_svmrbf
+## ✔ 14 of 16 resampling: no2019ae_svmrbf (6.9s)
+## i 15 of 16 resampling: no2019ae_svmpoly
+## ✔ 15 of 16 resampling: no2019ae_svmpoly (7.2s)
+## i 16 of 16 resampling: no2019ae_knnspec
+## ✔ 16 of 16 resampling: no2019ae_knnspec (6.6s)
+
+fit_wflows %>%
+  collect_metrics() %>%
+  filter(.metric %in% c("roc_auc", "accuracy")) %>%
+  separate(wflow_id, into = c("rec", "mod"), sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = rec, y = mean, color = mod, group = mod)) +
+  geom_point() + geom_line() + facet_wrap(~ factor(.metric)) +
+  labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
+```
+
+![plot of chunk unnamed-chunk-6](figures/pres-unnamed-chunk-6-1.png)
+
+

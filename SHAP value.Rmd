@@ -1,0 +1,200 @@
+
+# The goal of this file is to try intepret the model. SHAP value is one of the tool used for this goal. It increases the model transparency. 
+First, what is the SHAP value? 
+
+It is the average of the marginal contributions across all permutations. 
+
+Nice example: wood log = error log and hammers are predictors to attach the error log. Error= actual-predicted. 
+And the idea is to measure the contributions of the hammers (i.e. predictors). How to do that? SHAPLEY values!
+
+1. Global intepretability: how each predictor contributes either positively or negatively to the target variable. (similar to predictor importance with the difference that it shows pos or neg relation with the target variable). 
+
+2. Local intepretability: each observation gets a set of SHAP values. We can explain why a case receives its prediction and the contributions of the predictors. (the importance predictors show for the whole population not for each case. This one for instance shows the contributions of predictors for each client not for the whole set of clients). The local interpretability enables us to pinpoint and contrast the impacts of the factors.
+
+3. SHAP values can be used for any tree based model. 
+
+As usual, Shap values do not show causality (correlation does not mean causality). 
+
+Thus, with SHAP we explain how much each feature contributes to the value of a single prediction. To be more precise, we explain how much it contributes to the deviation from the mean prediction of a chosen reference dataset. Further in the blog, you will see an example of such an explanation.
+
+How does TreeSHAP work?
+TreeSHAP is an algorithm to compute SHAP values for tree ensemble models such as decision trees, random forests, and gradient boosted trees in a polynomial-time. 
+
+
+Now, let's start implementing in R. For the purpose of this demonstration, we will use the simple Random Forest model without tuning. 
+
+First, let's collect the data. 
+Compute some summary statistic for each client.
+
+Load some libraries and necessary data files
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+per <- read_feather("data/simulation_data/all_persons.feather")
+```
+
+```{r}
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+```
+
+We can add some demographic information based on zip3.
+```{r}
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+```
+There seems to be some clients with some zip codes that we cannot deal with. These are the ones
+```{r}
+clients %>%
+  anti_join(zip_data, by = "zip3") %>%
+  select(zip3)
+```
+These correspond to the following areas
+
+ZIP3 | Area       |
+-----|------------|
+969  | Guam, Palau, Federated States of Micronesia, Northern Mariana Islands, Marshall Islands |
+093  | Military bases in Iraq and Afghanistan |
+732  | Not in use |
+872  | Not in use |
+004  | Not in use |
+202  | Washington DC, Government 1 |
+
+We ignore clients with these zip codes. There are also two clients in DC for which we're missing election data. We will ignore those as well.
+```{r}
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+
+Now, let's implement the random forest model using ranger (again without tuning). 
+```{r}
+clients <-
+  clients %>%
+  select(-client, -zip3, -ae_2020, -actual_2020)
+```
+
+# We need a package called treeshap. To do that, install a package called "devtools" then do this: devtools::install_github('ModelOriented/treeshap')
+
+```{r}
+library(treeshap)
+
+```
+# extract workflow fit (model) check the file you sent to DOUG 
+train on the whole thing and fir on the whole thing (instead of 75%)
+
+```{r}
+clients$adverse <- ifelse(clients$adverse == "ae > 3",1,0)
+```
+
+```{r}
+#ranger_recipe <-
+ # recipe(adverse ~ ., data = clients) %>%
+  #step_zv(all_predictors()) %>%
+  #step_normalize(all_predictors(), -all_nominal())
+```
+
+```{r}
+#ranger_spec <-
+ # rand_forest(trees = 1000) %>%
+  #set_mode("classification") %>%
+  #set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+```
+
+Wrap the recipe and model into a workflow
+```{r}
+#ranger_workflow <-
+  #workflow() %>%
+  #add_recipe(ranger_recipe) %>%
+  #add_model(ranger_spec)
+```
+
+
+
+
+```{r}
+model <- ranger::ranger(adverse ~ ., data = clients)
+```
+
+
+# we have to start with unifying the model. 
+```{r}
+model_unified <- ranger.unify(model, clients)
+```
+
+```{r}
+treeshap_res <- treeshap(model_unified, clients[1:492, ])
+treeshap_res$shaps
+```
+```{r}
+plot_contribution(treeshap_res, obs = 1, min_max = c(0, 1))
+```
+We can aggregate SHAP values from the dataset or its parts to acquire SHAP-based feature importance.
+```{r}
+plot_feature_importance(treeshap_res, max_vars = 8)
+```
+We can profile the most important variable to learn more about it.
+
+```{r}
+plot_feature_dependence(treeshap_res, )
+```
+
+```{r}
+inter <- treeshap(model_unified, clients[1:492,], interactions = 5)
+
+```
+
+```{r}
+treeshap_interactions <- treeshap_res$interactionselement
+treeshap_interactions
+```
+
+```{r}
+plot_interaction(treeshap_interactions, 'hs', 'unemp')
+
+```
