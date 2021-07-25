@@ -598,6 +598,19 @@ Conf. matrix, accuracy, sens, spec, whatever you like
 
 
 ```r
+final_fit %>%
+  collect_metrics()
+```
+
+```
+## # A tibble: 2 × 4
+##   .metric  .estimator .estimate .config             
+##   <chr>    <chr>          <dbl> <chr>               
+## 1 accuracy binary         0.855 Preprocessor1_Model1
+## 2 roc_auc  binary         0.862 Preprocessor1_Model1
+```
+
+```r
 thresholded_predictions <-
   final_fit %>%
   collect_predictions() %>%

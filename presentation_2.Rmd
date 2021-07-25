@@ -276,7 +276,7 @@ results <-
                seed = 828282,
                verbose = TRUE)
 ```
-```{r fig.width = 10, fig.height = 3}
+```{r fig.width = 8, fig.height = 4, dpi = 450}
 autoplot(results)
 ```
 
@@ -318,7 +318,7 @@ forest_tune <-
       control = control_grid(verbose = FALSE)
   )
 ```
-```{r}
+```{r dpi = 450}
 forest_tune %>%
   show_best(metric = "roc_auc", n = 10)
 
@@ -336,7 +336,7 @@ best_params <- list(mtry = 5, min_n = 6)
 
 use library `probably`
 
-```{r}
+```{r fig.width = 7}
 forest_resamples <-
   forest_wflow %>%
   finalize_workflow(best_params) %>%
@@ -397,6 +397,9 @@ Use `probably` to apply threshold.
 Conf. matrix, accuracy, sens, spec, whatever you like
 
 ```{r}
+final_fit %>%
+  collect_metrics()
+
 thresholded_predictions <-
   final_fit %>%
   collect_predictions() %>%
