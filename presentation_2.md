@@ -177,7 +177,7 @@ clients %>%
   pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
-  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(priority = "random") +
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(size = 0.5, priority = "random") +
   guides(color = "none") + labs(title = "Size of claims") +
   scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
 ```
@@ -375,6 +375,7 @@ fit_wflows %>%
 
 ## Trying many models with many tuning parameters
 
+
 ```r
 tune_log_spec <-
   logistic_reg(penalty = tune()) %>%
@@ -485,18 +486,23 @@ forest_tune <-
 
 ```r
 forest_tune %>%
-  show_best(metric = "roc_auc")
+  show_best(metric = "roc_auc", n = 10)
 ```
 
 ```
-## # A tibble: 5 × 8
-##    mtry min_n .metric .estimator  mean     n std_err .config              
-##   <int> <int> <chr>   <chr>      <dbl> <int>   <dbl> <chr>                
-## 1     9    14 roc_auc binary     0.857    10  0.0182 Preprocessor1_Model0…
-## 2     7     6 roc_auc binary     0.857    10  0.0166 Preprocessor1_Model0…
-## 3     5     6 roc_auc binary     0.856    10  0.0168 Preprocessor1_Model0…
-## 4     5    10 roc_auc binary     0.855    10  0.0179 Preprocessor1_Model0…
-## 5     3     6 roc_auc binary     0.855    10  0.0177 Preprocessor1_Model0…
+## # A tibble: 10 × 8
+##     mtry min_n .metric .estimator  mean     n std_err .config             
+##    <int> <int> <chr>   <chr>      <dbl> <int>   <dbl> <chr>               
+##  1     9    14 roc_auc binary     0.857    10  0.0182 Preprocessor1_Model…
+##  2     7     6 roc_auc binary     0.857    10  0.0166 Preprocessor1_Model…
+##  3     5     6 roc_auc binary     0.856    10  0.0168 Preprocessor1_Model…
+##  4     5    10 roc_auc binary     0.855    10  0.0179 Preprocessor1_Model…
+##  5     3     6 roc_auc binary     0.855    10  0.0177 Preprocessor1_Model…
+##  6     3    10 roc_auc binary     0.855    10  0.0170 Preprocessor1_Model…
+##  7     3    14 roc_auc binary     0.855    10  0.0172 Preprocessor1_Model…
+##  8     5     2 roc_auc binary     0.855    10  0.0177 Preprocessor1_Model…
+##  9     7    18 roc_auc binary     0.855    10  0.0199 Preprocessor1_Model…
+## 10     9    10 roc_auc binary     0.855    10  0.0180 Preprocessor1_Model…
 ```
 
 ```r
@@ -550,7 +556,9 @@ forest_resamples %>%
   group_by(.threshold, .metric) %>%
   summarize(estimate = mean(.estimate)) %>%
   filter(.metric != "distance") %>%
-  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line() +
+  geom_vline(xintercept = 0.67, linetype = "dashed") +
+  labs(x = "Estimate", y = "Threshold", color = "Metric", title = "Sensitivity and specificity by threshold")
 ```
 
 ```
@@ -559,7 +567,12 @@ forest_resamples %>%
 
 ![plot of chunk unnamed-chunk-15](figures/pres-unnamed-chunk-15-2.png)
 
-We select ... as our final threshold
+We select 0.67 as our final threshold
+
+```r
+my_threshold <- 0.67
+```
+
 
 ## This is our final model !!!
 
@@ -583,39 +596,50 @@ trained_recipe <-
 Use `probably` to apply threshold.
 Conf. matrix, accuracy, sens, spec, whatever you like
 
-Below is not yet using thresholds!!!!
 
 ```r
-final_fit %>%
-  collect_metrics()
-```
-
-```
-## # A tibble: 2 × 4
-##   .metric  .estimator .estimate .config             
-##   <chr>    <chr>          <dbl> <chr>               
-## 1 accuracy binary         0.855 Preprocessor1_Model1
-## 2 roc_auc  binary         0.862 Preprocessor1_Model1
-```
-
-```r
-final_pred <-
+thresholded_predictions <-
   final_fit %>%
-  collect_predictions()
-```
+  collect_predictions() %>%
+  select(-.pred_class) %>%
+  mutate(class_pred = 
+            make_two_class_pred(
+                  `.pred_ae > 3`,
+                  levels = levels(clients$adverse),
+                  threshold = my_threshold))
 
+confusion_matrix <-
+  thresholded_predictions %>%
+  conf_mat(adverse, class_pred)
 
-```r
-final_pred %>%
-  conf_mat(adverse, .pred_class) %>%
-  pluck(1) %>%
-  as_tibble() %>%
-  ggplot(aes(Prediction, Truth, alpha = n)) +
-  geom_tile(show.legend = FALSE) +
-  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
+confusion_matrix %>%
+  autoplot(type = "heatmap")
 ```
 
 ![plot of chunk unnamed-chunk-18](figures/pres-unnamed-chunk-18-1.png)
+
+```r
+confusion_matrix %>% summary()
+```
+
+```
+## # A tibble: 13 × 3
+##    .metric              .estimator .estimate
+##    <chr>                <chr>          <dbl>
+##  1 accuracy             binary         0.823
+##  2 kap                  binary         0.563
+##  3 sens                 binary         0.848
+##  4 spec                 binary         0.75 
+##  5 ppv                  binary         0.907
+##  6 npv                  binary         0.632
+##  7 mcc                  binary         0.567
+##  8 j_index              binary         0.598
+##  9 bal_accuracy         binary         0.799
+## 10 detection_prevalence binary         0.694
+## 11 precision            binary         0.907
+## 12 recall               binary         0.848
+## 13 f_meas               binary         0.876
+```
 
 #SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
 
