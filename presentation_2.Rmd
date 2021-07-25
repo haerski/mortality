@@ -98,6 +98,7 @@ clients %>%
 
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
 ```{r}
+set.seed(92929292)
 clients %>%
   select(expected, actual_2019, actual_2020, actual_2021) %>%
   rename(actual_Expected = expected) %>%
@@ -309,11 +310,11 @@ forest_grid <-
 ```{r tune_forest, cache = TRUE, collapse = TRUE}
 forest_tune <-
   forest_wflow %>%
-  tune_race_anova(
+  tune_grid(
       resamples = crossval,
       grid = forest_grid,
       metrics = metric_set(roc_auc, accuracy),
-      control = control_race(verbose = FALSE, verbose_elim = TRUE)
+      control = control_grid(verbose = FALSE)
   )
 ```
 ```{r}
@@ -321,7 +322,6 @@ forest_tune %>%
   show_best(metric = "roc_auc")
 
 autoplot(forest_tune)
-plot_race(forest_tune)
 ```
 
 ## These are our optimal parameters

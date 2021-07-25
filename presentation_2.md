@@ -170,6 +170,7 @@ clients %>%
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
 
 ```r
+set.seed(92929292)
 clients %>%
   select(expected, actual_2019, actual_2020, actual_2021) %>%
   rename(actual_Expected = expected) %>%
@@ -474,21 +475,12 @@ forest_grid <-
 ```r
 forest_tune <-
   forest_wflow %>%
-  tune_race_anova(
+  tune_grid(
       resamples = crossval,
       grid = forest_grid,
       metrics = metric_set(roc_auc, accuracy),
-      control = control_race(verbose = FALSE, verbose_elim = TRUE)
+      control = control_grid(verbose = FALSE)
   )
-## ℹ Racing will maximize the roc_auc metric.
-## ℹ Resamples are analyzed in a random order.
-## ℹ Fold09:  49 eliminated;  51 candidates remain.
-## ℹ Fold04:  11 eliminated;  40 candidates remain.
-## ℹ Fold02:   5 eliminated;  35 candidates remain.
-## ℹ Fold07:   3 eliminated;  32 candidates remain.
-## ℹ Fold10:   2 eliminated;  30 candidates remain.
-## ℹ Fold08:   2 eliminated;  28 candidates remain.
-## ℹ Fold06:   1 eliminated;  27 candidates remain.
 ```
 
 ```r
@@ -512,12 +504,6 @@ autoplot(forest_tune)
 ```
 
 ![plot of chunk unnamed-chunk-13](figures/pres-unnamed-chunk-13-1.png)
-
-```r
-plot_race(forest_tune)
-```
-
-![plot of chunk unnamed-chunk-13](figures/pres-unnamed-chunk-13-2.png)
 
 ## These are our optimal parameters
 
