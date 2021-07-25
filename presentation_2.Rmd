@@ -202,7 +202,7 @@ set.seed(30308)
 crossval <- vfold_cv(training(init), strata = adverse)
 ```
 
-```{r collapse = TRUE, cache = TRUE}
+```{r mod_with_without_2019, collapse = TRUE, cache = TRUE}
 fit_wflows <-
   wflows %>%
   workflow_map(fn = "fit_resamples",
@@ -262,7 +262,7 @@ recipes <- list(no2019_rec)
 wflows <- workflow_set(recipes, models)
 ```
 
-```{r cache = TRUE, collapse = TRUE}
+```{r tune_many_models, cache = TRUE, collapse = TRUE}
 # make a bigger grid!
 # or use something like finetune!
 results <-
@@ -306,7 +306,7 @@ forest_params <-
 forest_grid <-
   grid_regular(forest_params, levels = 10)
 ```
-```{r cache = TRUE, collapse = TRUE}
+```{r tune_forest, cache = TRUE, collapse = TRUE}
 forest_tune <-
   forest_wflow %>%
   tune_race_anova(

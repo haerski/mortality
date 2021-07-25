@@ -158,11 +158,14 @@ clients %>%
   pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
   mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
   ggplot(aes(x = year, fill = adverse)) + geom_bar() +
-  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")+
-  scale_fill_manual(values = c("yellow2", "deepskyblue"))
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
 ```
 
 ![plot of chunk unnamed-chunk-3](figures/pres-unnamed-chunk-3-1.png)
+
+```r
+  # scale_fill_manual(values = c("yellow2", "deepskyblue"))
+```
 
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
 
@@ -173,7 +176,7 @@ clients %>%
   pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
-  ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(priority = "random") +
   guides(color = "none") + labs(title = "Size of claims") +
   scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
 ```
@@ -182,15 +185,21 @@ clients %>%
 
 
 ```r
-ggplot(data) + 
-  geom_density(aes(x = log(actual2019)), fill = "deepskyblue", alpha = 0.5) +
-  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+ggplot(clients) +
+  geom_density(aes(x = actual_2019), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
 ```
 
 ```
-## Error:   You're passing a function as global data.
-##   Have you misspelled the `data` argument in `ggplot()`
+## Warning: Transformation introduced infinite values in continuous x-axis
 ```
+
+```
+## Warning: Removed 47 rows containing non-finite values (stat_density).
+```
+
+![plot of chunk unnamed-chunk-5](figures/pres-unnamed-chunk-5-1.png)
 
 ```r
   #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
@@ -199,39 +208,52 @@ ggplot(data) +
 ```
 
 ```r
-ggplot(data) + 
-  geom_density(aes(x = log(actual2020)), fill = "deepskyblue", alpha = 0.5) +
-  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+ggplot(clients) +
+  geom_density(aes(x = actual_2020), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
 ```
 
 ```
-## Error:   You're passing a function as global data.
-##   Have you misspelled the `data` argument in `ggplot()`
+## Warning: Transformation introduced infinite values in continuous x-axis
 ```
+
+```
+## Warning: Removed 7 rows containing non-finite values (stat_density).
+```
+
+![plot of chunk unnamed-chunk-6](figures/pres-unnamed-chunk-6-1.png)
 
 ```r
-ggplot(data) +
-  geom_density(aes(x = log(actual2021)), fill = "deepskyblue", alpha = 0.5) +
-  geom_density(aes(x = log(expected)), fill = "black", alpha = 0.5)
+ggplot(clients) +
+  geom_density(aes(x = actual_2021), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
 ```
 
 ```
-## Error:   You're passing a function as global data.
-##   Have you misspelled the `data` argument in `ggplot()`
+## Warning: Transformation introduced infinite values in continuous x-axis
 ```
+
+```
+## Warning: Removed 23 rows containing non-finite values (stat_density).
+```
+
+![plot of chunk unnamed-chunk-7](figures/pres-unnamed-chunk-7-1.png)
 ##Trying many models with and without 2019 AE as a predictor
 
 
 ```r
 clients <-
   clients %>%
-  select(-client, -zip3,
+  select(
          -ae_2020, -ae_2021, -actual_2020, -actual_2019, -actual_2021,
          -hes, -hes_uns, -str_hes)
 
 
 with2019_rec <-
   recipe(adverse ~ ., data = clients) %>%
+  update_role(zip3, client, new_role = "ID") %>%
   step_zv(all_predictors()) %>%
   step_normalize(all_predictors(), -all_nominal())
 no2019_rec <-
@@ -283,7 +305,9 @@ models <- list(log = log_spec,
 recipes <- list("with2019ae" = with2019_rec,
                 "no2019ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
+```
 
+```r
 set.seed(30308)
 init <- initial_split(clients, strata = adverse)
 set.seed(30308)
@@ -301,37 +325,37 @@ fit_wflows <-
                metrics = metric_set(roc_auc, sens, accuracy),
                verbose = TRUE)
 ## i  1 of 16 resampling: with2019ae_log
-## ✔  1 of 16 resampling: with2019ae_log (3.7s)
+## ✔  1 of 16 resampling: with2019ae_log (3.5s)
 ## i  2 of 16 resampling: with2019ae_logtuned
-## ✔  2 of 16 resampling: with2019ae_logtuned (4.3s)
+## ✔  2 of 16 resampling: with2019ae_logtuned (3.8s)
 ## i  3 of 16 resampling: with2019ae_forest
-## ✔  3 of 16 resampling: with2019ae_forest (5.1s)
+## ✔  3 of 16 resampling: with2019ae_forest (4.4s)
 ## i  4 of 16 resampling: with2019ae_foresttuned
-## ✔  4 of 16 resampling: with2019ae_foresttuned (5.6s)
+## ✔  4 of 16 resampling: with2019ae_foresttuned (4.6s)
 ## i  5 of 16 resampling: with2019ae_neural
-## ✔  5 of 16 resampling: with2019ae_neural (4s)
+## ✔  5 of 16 resampling: with2019ae_neural (3.7s)
 ## i  6 of 16 resampling: with2019ae_svmrbf
-## ✔  6 of 16 resampling: with2019ae_svmrbf (4.8s)
+## ✔  6 of 16 resampling: with2019ae_svmrbf (3.8s)
 ## i  7 of 16 resampling: with2019ae_svmpoly
-## ✔  7 of 16 resampling: with2019ae_svmpoly (4.2s)
+## ✔  7 of 16 resampling: with2019ae_svmpoly (3.9s)
 ## i  8 of 16 resampling: with2019ae_knnspec
 ## ✔  8 of 16 resampling: with2019ae_knnspec (3.9s)
 ## i  9 of 16 resampling: no2019ae_log
-## ✔  9 of 16 resampling: no2019ae_log (3.9s)
+## ✔  9 of 16 resampling: no2019ae_log (4s)
 ## i 10 of 16 resampling: no2019ae_logtuned
-## ✔ 10 of 16 resampling: no2019ae_logtuned (4.1s)
+## ✔ 10 of 16 resampling: no2019ae_logtuned (4.3s)
 ## i 11 of 16 resampling: no2019ae_forest
-## ✔ 11 of 16 resampling: no2019ae_forest (5s)
+## ✔ 11 of 16 resampling: no2019ae_forest (4.7s)
 ## i 12 of 16 resampling: no2019ae_foresttuned
-## ✔ 12 of 16 resampling: no2019ae_foresttuned (5.8s)
+## ✔ 12 of 16 resampling: no2019ae_foresttuned (5.2s)
 ## i 13 of 16 resampling: no2019ae_neural
-## ✔ 13 of 16 resampling: no2019ae_neural (4.1s)
+## ✔ 13 of 16 resampling: no2019ae_neural (3.9s)
 ## i 14 of 16 resampling: no2019ae_svmrbf
-## ✔ 14 of 16 resampling: no2019ae_svmrbf (4.3s)
+## ✔ 14 of 16 resampling: no2019ae_svmrbf (4s)
 ## i 15 of 16 resampling: no2019ae_svmpoly
-## ✔ 15 of 16 resampling: no2019ae_svmpoly (4.3s)
+## ✔ 15 of 16 resampling: no2019ae_svmpoly (4.2s)
 ## i 16 of 16 resampling: no2019ae_knnspec
-## ✔ 16 of 16 resampling: no2019ae_knnspec (4.1s)
+## ✔ 16 of 16 resampling: no2019ae_knnspec (3.8s)
 
 fit_wflows %>%
   collect_metrics() %>%
@@ -342,7 +366,7 @@ fit_wflows %>%
   labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
 ```
 
-![plot of chunk unnamed-chunk-9](figures/pres-unnamed-chunk-9-1.png)
+![plot of chunk mod_with_without_2019](figures/pres-mod_with_without_2019-1.png)
 
 
 
@@ -394,39 +418,44 @@ results <-
   wflows %>%
   workflow_map(resamples = crossval,
                grid = 10,
-               metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv),
+               metrics = metric_set(roc_auc, accuracy),
                control = control_grid(save_pred = TRUE),
                seed = 828282,
                verbose = TRUE)
-```
-
-```
 ## i 1 of 5 tuning:     recipe_log
-```
-
-```
-## Timing stopped at: 4.543 0.22 4.765
-```
-
-```
-## Execution stepped; returning current results
+## ✔ 1 of 5 tuning:     recipe_log (4.7s)
+## i 2 of 5 tuning:     recipe_forest
+## i Creating pre-processing data to finalize unknown parameter: mtry
+## ✔ 2 of 5 tuning:     recipe_forest (42.3s)
+## i 3 of 5 tuning:     recipe_sln
+## ✔ 3 of 5 tuning:     recipe_sln (39.1s)
+## i 4 of 5 tuning:     recipe_svm
+## ✔ 4 of 5 tuning:     recipe_svm (40.3s)
+## i 5 of 5 tuning:     recipe_knn
+## ✔ 5 of 5 tuning:     recipe_knn (35s)
 ```
 
 ```r
 autoplot(results)
 ```
 
-```
-## Error: There were 5 workflows that had no results.
-```
+![plot of chunk unnamed-chunk-11](figures/pres-unnamed-chunk-11-1.png)
 
-## Tuning a forest using ANOVA racing
+## Tuning a forest
+
+We don't need to normalize the predictors
 
 ```r
 forest_spec <-
   rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
   set_mode("classification") %>%
   set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+
+forest_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  update_role(client, zip3, new_role = "ID") %>%
+  step_zv(all_predictors())
 
 forest_wflow <-
   workflow() %>%
@@ -436,10 +465,10 @@ forest_wflow <-
 forest_params <-
   forest_wflow %>%
   parameters() %>%
-  update(mtry = mtry(c(1,20)))
+  update(mtry = mtry(c(1, 20)))
 
 forest_grid <-
-  grid_regular(forest_params, levels = 100)
+  grid_regular(forest_params, levels = 10)
 ```
 
 ```r
@@ -448,9 +477,18 @@ forest_tune <-
   tune_race_anova(
       resamples = crossval,
       grid = forest_grid,
-      metrics = metric_set(roc_auc),
-      control = control_race(verbose = FALSE, verbose_elim = FALSE)
+      metrics = metric_set(roc_auc, accuracy),
+      control = control_race(verbose = FALSE, verbose_elim = TRUE)
   )
+## ℹ Racing will maximize the roc_auc metric.
+## ℹ Resamples are analyzed in a random order.
+## ℹ Fold09:  49 eliminated;  51 candidates remain.
+## ℹ Fold04:  11 eliminated;  40 candidates remain.
+## ℹ Fold02:   5 eliminated;  35 candidates remain.
+## ℹ Fold07:   3 eliminated;  32 candidates remain.
+## ℹ Fold10:   2 eliminated;  30 candidates remain.
+## ℹ Fold08:   2 eliminated;  28 candidates remain.
+## ℹ Fold06:   1 eliminated;  27 candidates remain.
 ```
 
 ```r
@@ -459,48 +497,68 @@ forest_tune %>%
 ```
 
 ```
-## # A tibble: 5 x 8
+## # A tibble: 5 × 8
 ##    mtry min_n .metric .estimator  mean     n std_err .config              
 ##   <int> <int> <chr>   <chr>      <dbl> <int>   <dbl> <chr>                
-## 1     4     2 roc_auc binary     0.858    10  0.0175 Preprocessor1_Model0…
-## 2     4     8 roc_auc binary     0.857    10  0.0170 Preprocessor1_Model1…
-## 3     9    14 roc_auc binary     0.857    10  0.0182 Preprocessor1_Model2…
-## 4     5     7 roc_auc binary     0.857    10  0.0171 Preprocessor1_Model1…
-## 5     7     9 roc_auc binary     0.857    10  0.0170 Preprocessor1_Model1…
+## 1     9    14 roc_auc binary     0.857    10  0.0182 Preprocessor1_Model0…
+## 2     7     6 roc_auc binary     0.857    10  0.0166 Preprocessor1_Model0…
+## 3     5     6 roc_auc binary     0.856    10  0.0168 Preprocessor1_Model0…
+## 4     5    10 roc_auc binary     0.855    10  0.0179 Preprocessor1_Model0…
+## 5     3     6 roc_auc binary     0.855    10  0.0177 Preprocessor1_Model0…
 ```
 
-## This is our optimal, trained forest!
+```r
+autoplot(forest_tune)
+```
+
+![plot of chunk unnamed-chunk-13](figures/pres-unnamed-chunk-13-1.png)
+
+```r
+plot_race(forest_tune)
+```
+
+![plot of chunk unnamed-chunk-13](figures/pres-unnamed-chunk-13-2.png)
+
+## These are our optimal parameters
 
 
 
 ```r
 best_params <- list(mtry = 5, min_n = 6)
-final_fit <-
-  forest_wflow %>%
-  finalize_workflow(best_params) %>%
-  last_fit(init, metrics = metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
-
-trained_wflow <-
-  final_fit %>%
-  extract_workflow()
-
-trained_recipe <-
-  trained_wflow %>%
-  extract_recipe(estimated = TRUE)
 ```
 
-
 ## Threshold the forest
+
 use library `probably`
 
 
 ```r
-final_wflow <-
-  final_fit %>%
+forest_resamples <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  fit_resamples(
+      resamples = crossval,
+      control = control_resamples(save_pred = TRUE)
+  )
+
+forest_resamples %>%
+  select(.predictions) %>%
+  unnest(.predictions) %>%
+  roc_curve(adverse, `.pred_ae > 3`) %>%
+  autoplot()
+```
+
+![plot of chunk unnamed-chunk-15](figures/pres-unnamed-chunk-15-1.png)
+
+```r
+forest_resamples <-
+  forest_resamples %>%
   rowwise() %>%
   mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
 
-final_wflow %>%
+
+
+forest_resamples %>%
   select(thr_perf, id) %>%
   unnest(thr_perf) %>%
   group_by(.threshold, .metric) %>%
@@ -513,12 +571,33 @@ final_wflow %>%
 ## `summarise()` has grouped output by '.threshold'. You can override using the `.groups` argument.
 ```
 
-![plot of chunk unnamed-chunk-17](figures/pres-unnamed-chunk-17-1.png)
+![plot of chunk unnamed-chunk-15](figures/pres-unnamed-chunk-15-2.png)
 
-## Compute metrics
+We select ... as our final threshold
+
+## This is our final model !!!
+
+```r
+final_fit <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  last_fit(init)
+
+trained_wflow <-
+  final_fit %>%
+  extract_workflow()
+
+trained_recipe <-
+  trained_wflow %>%
+  extract_recipe(estimated = TRUE)
+```
+
+
+## Apply chosen threshold and compute metrics
+Use `probably` to apply threshold.
 Conf. matrix, accuracy, sens, spec, whatever you like
 
-
+Below is not yet using thresholds!!!!
 
 ```r
 final_fit %>%
@@ -526,17 +605,11 @@ final_fit %>%
 ```
 
 ```
-## # A tibble: 8 x 4
-##   .metric   .estimator .estimate .config             
-##   <chr>     <chr>          <dbl> <chr>               
-## 1 accuracy  binary         0.855 Preprocessor1_Model1
-## 2 sens      binary         0.924 Preprocessor1_Model1
-## 3 spec      binary         0.656 Preprocessor1_Model1
-## 4 ppv       binary         0.885 Preprocessor1_Model1
-## 5 npv       binary         0.75  Preprocessor1_Model1
-## 6 precision binary         0.885 Preprocessor1_Model1
-## 7 recall    binary         0.924 Preprocessor1_Model1
-## 8 roc_auc   binary         0.862 Preprocessor1_Model1
+## # A tibble: 2 × 4
+##   .metric  .estimator .estimate .config             
+##   <chr>    <chr>          <dbl> <chr>               
+## 1 accuracy binary         0.855 Preprocessor1_Model1
+## 2 roc_auc  binary         0.862 Preprocessor1_Model1
 ```
 
 ```r
@@ -556,9 +629,54 @@ final_pred %>%
   geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
 ```
 
-![plot of chunk unnamed-chunk-19](figures/pres-unnamed-chunk-19-1.png)
+![plot of chunk unnamed-chunk-18](figures/pres-unnamed-chunk-18-1.png)
 
 #SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
+
+
+```r
+fulltest <- testing(init)
+fulltrain <- training(init)
+```
+
+
+```r
+library(DALEX)
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+
+ex %>%
+  predict_parts(train %>% slice(343)) %>%
+  plot()
+
+fit_parsnip %>% predict(train %>% slice(343), type = "prob")
+```
+
+
+```r
+shap <- predict_parts(explainer = ex, 
+                      new_observation = train%>%slice(343), 
+                                 type = "shap",
+                                  B = 25)
+```
+
+```
+## Error in "explainer" %in% class(explainer): object 'ex' not found
+```
+
+
+```r
+plot(shap,show_boxplots = FALSE)
+```
+
+```
+## Error in h(simpleError(msg, call)): error in evaluating the argument 'x' in selecting a method for function 'plot': object 'shap' not found
+```
 
 
 ```r
@@ -599,9 +717,5 @@ model_unified <- ranger.unify(model, )
 
 
 #autoplot(cm, type = "heatmap")
-
-
-
-
 
 
