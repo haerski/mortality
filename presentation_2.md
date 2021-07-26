@@ -654,7 +654,7 @@ confusion_matrix %>% summary()
 ## 13 f_meas               binary         0.876
 ```
 
-#SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
+# SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
 
 
 ```r
@@ -662,9 +662,62 @@ fulltest <- testing(init)
 fulltrain <- training(init)
 ```
 
+```r
+fulltrain %>% slice (343)
+```
+
+```
+## # A tibble: 1 × 25
+##   client zip3  adverse  size    volume  avg_qx avg_age per_male
+##   <chr>  <chr> <fct>   <int>     <dbl>   <dbl>   <dbl>    <dbl>
+## 1 58     112   ae > 3   3582 447306925 0.00231    41.7    0.594
+## # … with 17 more variables: per_blue_collar <dbl>, expected <dbl>,
+## #   ae_2019 <dbl>, nohs <dbl>, hs <dbl>, college <dbl>, bachelor <dbl>,
+## #   R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>,
+## #   per_dem <dbl>, svi <dbl>, cvac <dbl>, income <dbl>, POP <dbl>,
+## #   density <dbl>
+```
+
+```r
+fulltest%>% slice(80)
+```
+
+```
+## # A tibble: 1 × 25
+##   client zip3  adverse  size    volume  avg_qx avg_age per_male
+##   <chr>  <chr> <fct>   <int>     <dbl>   <dbl>   <dbl>    <dbl>
+## 1 412    828   ae < 3   1212 150601200 0.00169    39.6    0.483
+## # … with 17 more variables: per_blue_collar <dbl>, expected <dbl>,
+## #   ae_2019 <dbl>, nohs <dbl>, hs <dbl>, college <dbl>, bachelor <dbl>,
+## #   R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>,
+## #   per_dem <dbl>, svi <dbl>, cvac <dbl>, income <dbl>, POP <dbl>,
+## #   density <dbl>
+```
+
 
 ```r
 library(DALEX)
+```
+
+```
+## Welcome to DALEX (version: 2.2.1).
+## Find examples and detailed introduction at: http://ema.drwhy.ai/
+## Additional features will be available after installation of: ggpubr.
+## Use 'install_dependencies()' to get all suggested dependencies
+```
+
+```
+## 
+## Attaching package: 'DALEX'
+```
+
+```
+## The following object is masked from 'package:dplyr':
+## 
+##     explain
+```
+
+```r
 fit_parsnip <- trained_wflow %>% extract_fit_parsnip
 train <- trained_recipe %>% bake(training(init))
 test <- trained_recipe %>% bake(testing(init))
@@ -672,73 +725,146 @@ ex <-
   explain(
     model = fit_parsnip,
     data = train)
+```
 
+```
+## Preparation of a new explainer is initiated
+##   -> model label       :  model_fit  ( [33m default [39m )
+##   -> data              :  368  rows  23  cols 
+##   -> data              :  tibble converted into a data.frame 
+##   -> target variable   :  not specified! ( [31m WARNING [39m )
+##   -> predict function  :  yhat.model_fit  will be used ( [33m default [39m )
+##   -> predicted values  :  No value for predict function target column. ( [33m default [39m )
+##   -> model_info        :  package parsnip , ver. 0.1.7 , task classification ( [33m default [39m ) 
+##   -> model_info        :  Model info detected classification task but 'y' is a NULL .  ( [31m WARNING [39m )
+##   -> model_info        :  By deafult classification tasks supports only numercical 'y' parameter. 
+##   -> model_info        :  Consider changing to numerical vector with 0 and 1 values.
+##   -> model_info        :  Otherwise I will not be able to calculate residuals or loss function.
+##   -> predicted values  :  numerical, min =  0.001 , mean =  0.2589597 , max =  0.94765  
+##   -> residual function :  difference between y and yhat ( [33m default [39m )
+##  [32m A new explainer has been created! [39m
+```
+
+```r
 ex %>%
   predict_parts(train %>% slice(343)) %>%
   plot()
+```
 
+![plot of chunk unnamed-chunk-21](figures/pres-unnamed-chunk-21-1.png)
+
+```r
 fit_parsnip %>% predict(train %>% slice(343), type = "prob")
 ```
 
+```
+## # A tibble: 1 × 2
+##   `.pred_ae > 3` `.pred_ae < 3`
+##            <dbl>          <dbl>
+## 1          0.981         0.0191
+```
+
 
 ```r
-shap <- predict_parts(explainer = ex, 
-                      new_observation = train%>%slice(343), 
+ex %>%
+  predict_parts(test %>% slice(80)) %>%
+  plot()
+```
+
+![plot of chunk unnamed-chunk-22](figures/pres-unnamed-chunk-22-1.png)
+
+```r
+fit_parsnip %>% predict(test %>% slice(80), type = "prob")
+```
+
+```
+## # A tibble: 1 × 2
+##   `.pred_ae > 3` `.pred_ae < 3`
+##            <dbl>          <dbl>
+## 1          0.302          0.698
+```
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = train %>% slice(343),
+                                 type = "break_down"
+                                  )
+                               
+plot(shap, show_boxplots = FALSE)
+```
+
+![plot of chunk unnamed-chunk-23](figures/pres-unnamed-chunk-23-1.png)
+
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "break_down")
+```
+
+
+```r
+shap %>%
+  mutate(contribution = - contribution) %>%
+  plot()
+```
+
+![plot of chunk unnamed-chunk-25](figures/pres-unnamed-chunk-25-1.png)
+
+```r
+plot(shap, show_boxplots = FALSE)
+```
+
+![plot of chunk unnamed-chunk-26](figures/pres-unnamed-chunk-26-1.png)
+# FOr first one 
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = train,
                                  type = "shap",
-                                  B = 25)
+                                  B = 25,
+                                  N = 400)
+                               
+plot(shap, show_boxplots = FALSE)
 ```
 
-```
-## Error in "explainer" %in% class(explainer): object 'ex' not found
-```
+![plot of chunk unnamed-chunk-27](figures/pres-unnamed-chunk-27-1.png)
 
 
 ```r
-plot(shap,show_boxplots = FALSE)
+shap <- predict_parts(explainer = ex,
+                      new_observation = train %>% slice(343),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
 ```
 
+![plot of chunk unnamed-chunk-28](figures/pres-unnamed-chunk-28-1.png)
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
 ```
-## Error in h(simpleError(msg, call)): error in evaluating the argument 'x' in selecting a method for function 'plot': object 'shap' not found
-```
+
+![plot of chunk unnamed-chunk-29](figures/pres-unnamed-chunk-29-1.png)
 
 
 ```r
-library(treeshap)
+vip(fit_parsnip, fill = hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE))
 ```
 
+![plot of chunk unnamed-chunk-30](figures/pres-unnamed-chunk-30-1.png)
 
 ```r
-clients$adverse <- ifelse(clients$adverse == "ae > 3", 1, 0)
+hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE)
 ```
 
-
-```r
-model <- final_fit %>%
-  extract_fit_engine()
 ```
-
-
-
-
-```r
-test <- testing(init)
-test$adverse <- ifelse(test$adverse == "ae > 3", 1, 0)
-test
+##  [1] "#4B0055" "#422C70" "#185086" "#007094" "#008E98" "#00A890" "#00BE7D"
+##  [8] "#6CD05E" "#BBDD38" "#FDE333"
 ```
-
-
-```r
-final_pred
-test
-test_pred <- merge((final_pred, test), 
-```
-
-
-```r
-model_unified <- ranger.unify(model, )
-```
-
-
-#autoplot(cm, type = "heatmap")
-
-
