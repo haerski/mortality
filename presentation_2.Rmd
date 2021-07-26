@@ -302,25 +302,188 @@ forest_tune %>%
 #############################
 ```
 
-## This is our optimal, trained forest!
 ```{r}
-best_params <- list(mtry = 3, min_n = 6)
+best_params <- list(mtry = 5, min_n = 6)
 final_fit <-
   forest_wflow %>%
   finalize_workflow(best_params) %>%
-  last_fit(init)
-
+  last_fit(init, metrics=metric_set(roc_auc, accuracy, sens, spec, ppv, npv, precision, recall))
 trained_wflow <-
   final_fit %>%
   extract_workflow()
-
 trained_recipe <-
   trained_wflow %>%
   extract_recipe(estimated = TRUE)
 ```
 
+
 ## Threshold the forest
 use library `probably`
 
+```{r choosing_bin_threshold}
+final_wflow <-
+  final_fit %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.5, 1, by = 0.01))))
+final_wflow %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line()
+```
+
 ## Compute metrics
 Conf. matrix, accuracy, sens, spec, whatever you like
+
+
+```{r}
+final_fit %>%
+  collect_metrics()
+final_pred <-
+  final_fit %>%
+  collect_predictions()
+```
+
+```{r}
+final_pred %>%
+	 conf_mat(adverse, .pred_class) %>%
+	 pluck(1) %>%
+	  as_tibble() %>%
+	  ggplot(aes(Prediction, Truth, alpha = n)) +
+	  geom_tile(show.legend = FALSE) +
+	  geom_text(aes(label = n), colour = "white", alpha = 1, size = 8)
+```
+#SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
+
+```{r}
+library(DALEX)
+```
+
+
+
+
+
+```{r}
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+ex %>%
+  predict_parts(test %>% slice(1)) %>%
+  plot()
+```
+
+```{r}
+test
+train
+```
+
+
+```{r}
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = test,
+    y=test$adverse)
+ex %>%
+  predict_parts(test %>% slice(10)) %>%
+  plot()
+
+
+
+```
+
+
+
+
+```{r}
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = test,
+    y=test$adverse)
+ex %>%
+  predict_parts(new_ob
+                
+  plot()
+
+
+
+```
+
+
+```{r}
+model <- final_fit %>% 
+  extract_fit_engine()
+```
+
+
+
+```{r}
+test <- testing(init)
+test$adverse <- ifelse(test$adverse == "ae > 3",1,0)
+test
+```
+
+```{r}
+final_pred
+test
+test_pred <- merge((final_pred, test), 
+```
+
+```{r}
+model_unified <- ranger.unify(model, )
+```
+
+
+#autoplot(cm, type = "heatmap")
+
+```
+## Tuning a forest using ANOVA racing
+TODO before knitting, remove the verbose option
+```{r collapse = TRUE}
+forest_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+forest_wflow <-
+  workflow() %>%
+  add_model(forest_spec) %>%
+  add_recipe(no2019_rec)
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1,20)))
+forest_grid <-
+  grid_regular(forest_params, levels = 10)
+#### NO NEED TO RUN THIS ####
+forest_tune <-
+  forest_wflow %>%
+  tune_race_anova(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc),
+      control = control_race(verbose = TRUE, verbose_elim = TRUE)
+  )
+forest_tune %>%
+  show_best(metric = "roc_auc")
+# The best ones
+#    mtry min_n 
+#   <int> <int> 
+#      9    14 
+#      7     6 
+#      5     6 
+#      5    10 
+#      3     6 
+```
