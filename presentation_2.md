@@ -17,6 +17,7 @@ library(magrittr)
 library(skimr)
 library(vip)
 library(ggbeeswarm)
+library(finetune)
 per <- read_feather("data/simulation_data/all_persons.feather")
 
 clients <-
@@ -162,38 +163,98 @@ clients %>%
 
 ![plot of chunk unnamed-chunk-3](figures/pres-unnamed-chunk-3-1.png)
 
+```r
+  # scale_fill_manual(values = c("yellow2", "deepskyblue"))
+```
+
 Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
 
 ```r
+set.seed(92929292)
 clients %>%
-  select(actual_2019, actual_2020, actual_2021) %>%
-  pivot_longer(actual_2019:actual_2021, names_to = "Year", values_to = "Claims") %>%
+  select(expected, actual_2019, actual_2020, actual_2021) %>%
+  rename(actual_Expected = expected) %>%
+  pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
   mutate(Year = str_sub(Year, 8)) %>%
   filter(Claims > 0) %>%
-  ggplot(aes(Year, log(Claims), color = Year)) + geom_beeswarm(priority = "random") +
-  guides(color = FALSE) + labs(title = "Size of claims")
-```
-
-```
-## Warning: `guides(<scale> = FALSE)` is deprecated. Please use
-## `guides(<scale> = "none")` instead.
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(size = 0.5, priority = "random") +
+  guides(color = "none") + labs(title = "Size of claims") +
+  scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
 ```
 
 ![plot of chunk unnamed-chunk-4](figures/pres-unnamed-chunk-4-1.png)
 
-## Trying many models with and without 2019 AE as a predictor
+
+```r
+ggplot(clients) +
+  geom_density(aes(x = actual_2019), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
+```
+
+```
+## Warning: Transformation introduced infinite values in continuous x-axis
+```
+
+```
+## Warning: Removed 47 rows containing non-finite values (stat_density).
+```
+
+![plot of chunk unnamed-chunk-5](figures/pres-unnamed-chunk-5-1.png)
+
+```r
+  #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
+  #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
+ # scale_y_continuous(name="Actual vs Expected Claims in 2019")
+```
+
+```r
+ggplot(clients) +
+  geom_density(aes(x = actual_2020), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
+```
+
+```
+## Warning: Transformation introduced infinite values in continuous x-axis
+```
+
+```
+## Warning: Removed 7 rows containing non-finite values (stat_density).
+```
+
+![plot of chunk unnamed-chunk-6](figures/pres-unnamed-chunk-6-1.png)
+
+```r
+ggplot(clients) +
+  geom_density(aes(x = actual_2021), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
+```
+
+```
+## Warning: Transformation introduced infinite values in continuous x-axis
+```
+
+```
+## Warning: Removed 23 rows containing non-finite values (stat_density).
+```
+
+![plot of chunk unnamed-chunk-7](figures/pres-unnamed-chunk-7-1.png)
+##Trying many models with and without 2019 AE as a predictor
 
 
 ```r
 clients <-
   clients %>%
-  select(-client, -zip3,
+  select(
          -ae_2020, -ae_2021, -actual_2020, -actual_2019, -actual_2021,
          -hes, -hes_uns, -str_hes)
 
 
 with2019_rec <-
   recipe(adverse ~ ., data = clients) %>%
+  update_role(zip3, client, new_role = "ID") %>%
   step_zv(all_predictors()) %>%
   step_normalize(all_predictors(), -all_nominal())
 no2019_rec <-
@@ -245,7 +306,9 @@ models <- list(log = log_spec,
 recipes <- list("with2019ae" = with2019_rec,
                 "no2019ae" = no2019_rec)
 wflows <- workflow_set(recipes, models)
+```
 
+```r
 set.seed(30308)
 init <- initial_split(clients, strata = adverse)
 set.seed(30308)
@@ -263,37 +326,37 @@ fit_wflows <-
                metrics = metric_set(roc_auc, sens, accuracy),
                verbose = TRUE)
 ## i  1 of 16 resampling: with2019ae_log
-## ✔  1 of 16 resampling: with2019ae_log (5.4s)
+## ✔  1 of 16 resampling: with2019ae_log (3.5s)
 ## i  2 of 16 resampling: with2019ae_logtuned
-## ✔  2 of 16 resampling: with2019ae_logtuned (5.7s)
+## ✔  2 of 16 resampling: with2019ae_logtuned (3.8s)
 ## i  3 of 16 resampling: with2019ae_forest
-## ✔  3 of 16 resampling: with2019ae_forest (7s)
+## ✔  3 of 16 resampling: with2019ae_forest (4.4s)
 ## i  4 of 16 resampling: with2019ae_foresttuned
-## ✔  4 of 16 resampling: with2019ae_foresttuned (8.3s)
+## ✔  4 of 16 resampling: with2019ae_foresttuned (4.6s)
 ## i  5 of 16 resampling: with2019ae_neural
-## ✔  5 of 16 resampling: with2019ae_neural (6.3s)
+## ✔  5 of 16 resampling: with2019ae_neural (3.7s)
 ## i  6 of 16 resampling: with2019ae_svmrbf
-## ✔  6 of 16 resampling: with2019ae_svmrbf (6.7s)
+## ✔  6 of 16 resampling: with2019ae_svmrbf (3.8s)
 ## i  7 of 16 resampling: with2019ae_svmpoly
-## ✔  7 of 16 resampling: with2019ae_svmpoly (6.8s)
+## ✔  7 of 16 resampling: with2019ae_svmpoly (3.9s)
 ## i  8 of 16 resampling: with2019ae_knnspec
-## ✔  8 of 16 resampling: with2019ae_knnspec (6.3s)
+## ✔  8 of 16 resampling: with2019ae_knnspec (3.9s)
 ## i  9 of 16 resampling: no2019ae_log
-## ✔  9 of 16 resampling: no2019ae_log (6.3s)
+## ✔  9 of 16 resampling: no2019ae_log (4s)
 ## i 10 of 16 resampling: no2019ae_logtuned
-## ✔ 10 of 16 resampling: no2019ae_logtuned (6.5s)
+## ✔ 10 of 16 resampling: no2019ae_logtuned (4.3s)
 ## i 11 of 16 resampling: no2019ae_forest
-## ✔ 11 of 16 resampling: no2019ae_forest (7.8s)
+## ✔ 11 of 16 resampling: no2019ae_forest (4.7s)
 ## i 12 of 16 resampling: no2019ae_foresttuned
-## ✔ 12 of 16 resampling: no2019ae_foresttuned (8.5s)
+## ✔ 12 of 16 resampling: no2019ae_foresttuned (5.2s)
 ## i 13 of 16 resampling: no2019ae_neural
-## ✔ 13 of 16 resampling: no2019ae_neural (6.5s)
+## ✔ 13 of 16 resampling: no2019ae_neural (3.9s)
 ## i 14 of 16 resampling: no2019ae_svmrbf
-## ✔ 14 of 16 resampling: no2019ae_svmrbf (6.9s)
+## ✔ 14 of 16 resampling: no2019ae_svmrbf (4s)
 ## i 15 of 16 resampling: no2019ae_svmpoly
-## ✔ 15 of 16 resampling: no2019ae_svmpoly (7.2s)
+## ✔ 15 of 16 resampling: no2019ae_svmpoly (4.2s)
 ## i 16 of 16 resampling: no2019ae_knnspec
-## ✔ 16 of 16 resampling: no2019ae_knnspec (6.6s)
+## ✔ 16 of 16 resampling: no2019ae_knnspec (3.8s)
 
 fit_wflows %>%
   collect_metrics() %>%
@@ -304,6 +367,442 @@ fit_wflows %>%
   labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
 ```
 
-![plot of chunk unnamed-chunk-6](figures/pres-unnamed-chunk-6-1.png)
+![plot of chunk mod_with_without_2019](figures/pres-mod_with_without_2019-1.png)
 
 
+
+
+
+## Trying many models with many tuning parameters
+
+
+```r
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+# tune_svm_poly_spec <-
+#   svm_poly() %>%
+#   set_engine("kernlab") %>%
+#   set_mode("classification")
+tune_knn_spec <-
+  nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+models <- list(log = tune_log_spec,
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec,
+               knn = tune_knn_spec)
+recipes <- list(no2019_rec)
+wflows <- workflow_set(recipes, models)
+```
+
+
+```r
+# make a bigger grid!
+# or use something like finetune!
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+## i 1 of 5 tuning:     recipe_log
+## ✔ 1 of 5 tuning:     recipe_log (4.7s)
+## i 2 of 5 tuning:     recipe_forest
+## i Creating pre-processing data to finalize unknown parameter: mtry
+## ✔ 2 of 5 tuning:     recipe_forest (42.3s)
+## i 3 of 5 tuning:     recipe_sln
+## ✔ 3 of 5 tuning:     recipe_sln (39.1s)
+## i 4 of 5 tuning:     recipe_svm
+## ✔ 4 of 5 tuning:     recipe_svm (40.3s)
+## i 5 of 5 tuning:     recipe_knn
+## ✔ 5 of 5 tuning:     recipe_knn (35s)
+```
+
+```r
+autoplot(results)
+```
+
+![plot of chunk unnamed-chunk-11](figures/pres-unnamed-chunk-11-1.png)
+
+## Tuning a forest
+
+We don't need to normalize the predictors
+
+```r
+forest_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+
+forest_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  update_role(client, zip3, new_role = "ID") %>%
+  step_zv(all_predictors())
+
+forest_wflow <-
+  workflow() %>%
+  add_model(forest_spec) %>%
+  add_recipe(no2019_rec)
+
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1, 20)))
+
+forest_grid <-
+  grid_regular(forest_params, levels = 10)
+```
+
+```r
+forest_tune <-
+  forest_wflow %>%
+  tune_grid(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc, accuracy),
+      control = control_grid(verbose = FALSE)
+  )
+```
+
+```r
+forest_tune %>%
+  show_best(metric = "roc_auc", n = 10)
+```
+
+```
+## # A tibble: 10 × 8
+##     mtry min_n .metric .estimator  mean     n std_err .config             
+##    <int> <int> <chr>   <chr>      <dbl> <int>   <dbl> <chr>               
+##  1     9    14 roc_auc binary     0.857    10  0.0182 Preprocessor1_Model…
+##  2     7     6 roc_auc binary     0.857    10  0.0166 Preprocessor1_Model…
+##  3     5     6 roc_auc binary     0.856    10  0.0168 Preprocessor1_Model…
+##  4     5    10 roc_auc binary     0.855    10  0.0179 Preprocessor1_Model…
+##  5     3     6 roc_auc binary     0.855    10  0.0177 Preprocessor1_Model…
+##  6     3    10 roc_auc binary     0.855    10  0.0170 Preprocessor1_Model…
+##  7     3    14 roc_auc binary     0.855    10  0.0172 Preprocessor1_Model…
+##  8     5     2 roc_auc binary     0.855    10  0.0177 Preprocessor1_Model…
+##  9     7    18 roc_auc binary     0.855    10  0.0199 Preprocessor1_Model…
+## 10     9    10 roc_auc binary     0.855    10  0.0180 Preprocessor1_Model…
+```
+
+```r
+autoplot(forest_tune)
+```
+
+![plot of chunk unnamed-chunk-13](figures/pres-unnamed-chunk-13-1.png)
+
+## These are our optimal parameters
+
+
+
+```r
+best_params <- list(mtry = 5, min_n = 6)
+```
+
+## Threshold the forest
+
+use library `probably`
+
+
+```r
+forest_resamples <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  fit_resamples(
+      resamples = crossval,
+      control = control_resamples(save_pred = TRUE)
+  )
+
+forest_resamples %>%
+  select(.predictions) %>%
+  unnest(.predictions) %>%
+  roc_curve(adverse, `.pred_ae > 3`) %>%
+  autoplot()
+```
+
+![plot of chunk unnamed-chunk-15](figures/pres-unnamed-chunk-15-1.png)
+
+```r
+forest_resamples <-
+  forest_resamples %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
+
+
+
+forest_resamples %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line() +
+  geom_vline(xintercept = 0.67, linetype = "dashed") +
+  labs(x = "Threshold", y = "Estimate", color = "Metric", title = "Sensitivity and specificity by threshold")
+```
+
+```
+## `summarise()` has grouped output by '.threshold'. You can override using the `.groups` argument.
+```
+
+![plot of chunk unnamed-chunk-15](figures/pres-unnamed-chunk-15-2.png)
+
+We select 0.67 as our final threshold
+
+```r
+my_threshold <- 0.67
+```
+
+
+## This is our final model !!!
+
+```r
+final_fit <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  last_fit(init)
+
+trained_wflow <-
+  final_fit %>%
+  extract_workflow()
+
+trained_recipe <-
+  trained_wflow %>%
+  extract_recipe(estimated = TRUE)
+```
+
+
+## Apply chosen threshold and compute metrics
+Use `probably` to apply threshold.
+Conf. matrix, accuracy, sens, spec, whatever you like
+
+
+```r
+final_fit %>%
+  collect_metrics()
+```
+
+```
+## # A tibble: 2 × 4
+##   .metric  .estimator .estimate .config             
+##   <chr>    <chr>          <dbl> <chr>               
+## 1 accuracy binary         0.855 Preprocessor1_Model1
+## 2 roc_auc  binary         0.862 Preprocessor1_Model1
+```
+
+```r
+thresholded_predictions <-
+  final_fit %>%
+  collect_predictions() %>%
+  select(-.pred_class) %>%
+  mutate(class_pred =
+            make_two_class_pred(
+                  `.pred_ae > 3`,
+                  levels = levels(clients$adverse),
+                  threshold = my_threshold))
+
+confusion_matrix <-
+  thresholded_predictions %>%
+  conf_mat(adverse, class_pred)
+
+confusion_matrix %>%
+  autoplot(type = "heatmap")
+```
+
+![plot of chunk unnamed-chunk-18](figures/pres-unnamed-chunk-18-1.png)
+
+```r
+confusion_matrix %>% summary()
+```
+
+```
+## # A tibble: 13 × 3
+##    .metric              .estimator .estimate
+##    <chr>                <chr>          <dbl>
+##  1 accuracy             binary         0.823
+##  2 kap                  binary         0.563
+##  3 sens                 binary         0.848
+##  4 spec                 binary         0.75 
+##  5 ppv                  binary         0.907
+##  6 npv                  binary         0.632
+##  7 mcc                  binary         0.567
+##  8 j_index              binary         0.598
+##  9 bal_accuracy         binary         0.799
+## 10 detection_prevalence binary         0.694
+## 11 precision            binary         0.907
+## 12 recall               binary         0.848
+## 13 f_meas               binary         0.876
+```
+
+# SHAP value business
+
+```r
+fulltest <- testing(init)
+fulltrain <- training(init)
+```
+
+```r
+fulltrain %>% slice (343)
+```
+
+```
+## # A tibble: 1 × 25
+##   client zip3  adverse  size    volume  avg_qx avg_age per_male
+##   <chr>  <chr> <fct>   <int>     <dbl>   <dbl>   <dbl>    <dbl>
+## 1 58     112   ae > 3   3582 447306925 0.00231    41.7    0.594
+## # … with 17 more variables: per_blue_collar <dbl>, expected <dbl>,
+## #   ae_2019 <dbl>, nohs <dbl>, hs <dbl>, college <dbl>, bachelor <dbl>,
+## #   R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>,
+## #   per_dem <dbl>, svi <dbl>, cvac <dbl>, income <dbl>, POP <dbl>,
+## #   density <dbl>
+```
+
+```r
+fulltest %>% slice(80)
+```
+
+```
+## # A tibble: 1 × 25
+##   client zip3  adverse  size    volume  avg_qx avg_age per_male
+##   <chr>  <chr> <fct>   <int>     <dbl>   <dbl>   <dbl>    <dbl>
+## 1 412    828   ae < 3   1212 150601200 0.00169    39.6    0.483
+## # … with 17 more variables: per_blue_collar <dbl>, expected <dbl>,
+## #   ae_2019 <dbl>, nohs <dbl>, hs <dbl>, college <dbl>, bachelor <dbl>,
+## #   R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>,
+## #   per_dem <dbl>, svi <dbl>, cvac <dbl>, income <dbl>, POP <dbl>,
+## #   density <dbl>
+```
+
+Break-down profile of New York
+
+```r
+library(DALEX)
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+```
+
+```
+## Preparation of a new explainer is initiated
+##   -> model label       :  model_fit  ( [33m default [39m )
+##   -> data              :  368  rows  23  cols 
+##   -> data              :  tibble converted into a data.frame 
+##   -> target variable   :  not specified! ( [31m WARNING [39m )
+##   -> predict function  :  yhat.model_fit  will be used ( [33m default [39m )
+##   -> predicted values  :  No value for predict function target column. ( [33m default [39m )
+##   -> model_info        :  package parsnip , ver. 0.1.7 , task classification ( [33m default [39m ) 
+##   -> model_info        :  Model info detected classification task but 'y' is a NULL .  ( [31m WARNING [39m )
+##   -> model_info        :  By deafult classification tasks supports only numercical 'y' parameter. 
+##   -> model_info        :  Consider changing to numerical vector with 0 and 1 values.
+##   -> model_info        :  Otherwise I will not be able to calculate residuals or loss function.
+##   -> predicted values  :  numerical, min =  0.001 , mean =  0.2589597 , max =  0.94765  
+##   -> residual function :  difference between y and yhat ( [33m default [39m )
+##  [32m A new explainer has been created! [39m
+```
+
+```r
+ex %>%
+  predict_parts(train %>% slice(343)) %>%
+  plot()
+```
+
+![plot of chunk unnamed-chunk-21](figures/pres-unnamed-chunk-21-1.png)
+
+```r
+fit_parsnip %>% predict(train %>% slice(343), type = "prob")
+```
+
+```
+## # A tibble: 1 × 2
+##   `.pred_ae > 3` `.pred_ae < 3`
+##            <dbl>          <dbl>
+## 1          0.981         0.0191
+```
+
+Break-down profile of NC
+
+```r
+ex %>%
+  predict_parts(test %>% slice(80)) %>%
+  plot()
+```
+
+![plot of chunk unnamed-chunk-22](figures/pres-unnamed-chunk-22-1.png)
+
+```r
+fit_parsnip %>% predict(test %>% slice(80), type = "prob")
+```
+
+```
+## # A tibble: 1 × 2
+##   `.pred_ae > 3` `.pred_ae < 3`
+##            <dbl>          <dbl>
+## 1          0.302          0.698
+```
+
+# FOr first one 
+Shap new york
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = train %>% slice(343),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+
+![plot of chunk shapNY](figures/pres-shapNY-1.png)
+
+Shap NC
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+
+![plot of chunk shapNC](figures/pres-shapNC-1.png)
+
+
+```r
+trained_wflow %>%
+  extract_fit_engine() %>%
+  importance() %>%
+  as_tibble_row() %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Importance") %>%
+  slice_max(Importance, n = 10) %>%
+  ggplot(aes(y = fct_reorder(factor(Variable), Importance), x = Importance, fill = fct_reorder(factor(Variable), Importance))) +
+  geom_col() +
+  scale_fill_brewer(palette = "Spectral") +
+  guides(fill = "none") + labs(y = "Variable", x = "Importance")
+```
+
+![plot of chunk unnamed-chunk-23](figures/pres-unnamed-chunk-23-1.png)
