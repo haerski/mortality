@@ -558,7 +558,7 @@ forest_resamples %>%
   filter(.metric != "distance") %>%
   ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line() +
   geom_vline(xintercept = 0.67, linetype = "dashed") +
-  labs(x = "Estimate", y = "Threshold", color = "Metric", title = "Sensitivity and specificity by threshold")
+  labs(x = "Threshold", y = "Estimate", color = "Metric", title = "Sensitivity and specificity by threshold")
 ```
 
 ```
