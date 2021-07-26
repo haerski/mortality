@@ -615,7 +615,7 @@ thresholded_predictions <-
   final_fit %>%
   collect_predictions() %>%
   select(-.pred_class) %>%
-  mutate(class_pred = 
+  mutate(class_pred =
             make_two_class_pred(
                   `.pred_ae > 3`,
                   levels = levels(clients$adverse),
@@ -654,8 +654,7 @@ confusion_matrix %>% summary()
 ## 13 f_meas               binary         0.876
 ```
 
-# SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
-
+# SHAP value business
 
 ```r
 fulltest <- testing(init)
@@ -679,7 +678,7 @@ fulltrain %>% slice (343)
 ```
 
 ```r
-fulltest%>% slice(80)
+fulltest %>% slice(80)
 ```
 
 ```
@@ -694,30 +693,10 @@ fulltest%>% slice(80)
 ## #   density <dbl>
 ```
 
+Break-down profile of New York
 
 ```r
 library(DALEX)
-```
-
-```
-## Welcome to DALEX (version: 2.2.1).
-## Find examples and detailed introduction at: http://ema.drwhy.ai/
-## Additional features will be available after installation of: ggpubr.
-## Use 'install_dependencies()' to get all suggested dependencies
-```
-
-```
-## 
-## Attaching package: 'DALEX'
-```
-
-```
-## The following object is masked from 'package:dplyr':
-## 
-##     explain
-```
-
-```r
 fit_parsnip <- trained_wflow %>% extract_fit_parsnip
 train <- trained_recipe %>% bake(training(init))
 test <- trained_recipe %>% bake(testing(init))
@@ -764,6 +743,7 @@ fit_parsnip %>% predict(train %>% slice(343), type = "prob")
 ## 1          0.981         0.0191
 ```
 
+Break-down profile of NC
 
 ```r
 ex %>%
@@ -784,87 +764,45 @@ fit_parsnip %>% predict(test %>% slice(80), type = "prob")
 ## 1          0.302          0.698
 ```
 
+# FOr first one 
+Shap new york
+
 ```r
 shap <- predict_parts(explainer = ex,
                       new_observation = train %>% slice(343),
-                                 type = "break_down"
-                                  )
+                                 type = "shap",
+                                  B = 100)
                                
 plot(shap, show_boxplots = FALSE)
+```
+
+![plot of chunk shapNY](figures/pres-shapNY-1.png)
+
+Shap NC
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+
+![plot of chunk shapNC](figures/pres-shapNC-1.png)
+
+
+```r
+trained_wflow %>%
+  extract_fit_engine() %>%
+  importance() %>%
+  as_tibble_row() %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Importance") %>%
+  slice_max(Importance, n = 10) %>%
+  ggplot(aes(y = fct_reorder(factor(Variable), Importance), x = Importance, fill = fct_reorder(factor(Variable), Importance))) +
+  geom_col() +
+  scale_fill_brewer(palette = "Spectral") +
+  guides(fill = "none") + labs(y = "Variable", x = "Importance")
 ```
 
 ![plot of chunk unnamed-chunk-23](figures/pres-unnamed-chunk-23-1.png)
-
-
-```r
-shap <- predict_parts(explainer = ex,
-                      new_observation = test %>% slice(80),
-                                 type = "break_down")
-```
-
-
-```r
-shap %>%
-  mutate(contribution = - contribution) %>%
-  plot()
-```
-
-![plot of chunk unnamed-chunk-25](figures/pres-unnamed-chunk-25-1.png)
-
-```r
-plot(shap, show_boxplots = FALSE)
-```
-
-![plot of chunk unnamed-chunk-26](figures/pres-unnamed-chunk-26-1.png)
-# FOr first one 
-
-```r
-shap <- predict_parts(explainer = ex,
-                      new_observation = train,
-                                 type = "shap",
-                                  B = 25,
-                                  N = 400)
-                               
-plot(shap, show_boxplots = FALSE)
-```
-
-![plot of chunk unnamed-chunk-27](figures/pres-unnamed-chunk-27-1.png)
-
-
-```r
-shap <- predict_parts(explainer = ex,
-                      new_observation = train %>% slice(343),
-                                 type = "shap",
-                                  B = 100)
-                               
-plot(shap, show_boxplots = FALSE)
-```
-
-![plot of chunk unnamed-chunk-28](figures/pres-unnamed-chunk-28-1.png)
-
-```r
-shap <- predict_parts(explainer = ex,
-                      new_observation = test %>% slice(80),
-                                 type = "shap",
-                                  B = 100)
-                               
-plot(shap, show_boxplots = FALSE)
-```
-
-![plot of chunk unnamed-chunk-29](figures/pres-unnamed-chunk-29-1.png)
-
-
-```r
-vip(fit_parsnip, fill = hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE))
-```
-
-![plot of chunk unnamed-chunk-30](figures/pres-unnamed-chunk-30-1.png)
-
-```r
-hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE)
-```
-
-```
-##  [1] "#4B0055" "#422C70" "#185086" "#007094" "#008E98" "#00A890" "#00BE7D"
-##  [8] "#6CD05E" "#BBDD38" "#FDE333"
-```

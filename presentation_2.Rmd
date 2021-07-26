@@ -404,7 +404,7 @@ thresholded_predictions <-
   final_fit %>%
   collect_predictions() %>%
   select(-.pred_class) %>%
-  mutate(class_pred = 
+  mutate(class_pred =
             make_two_class_pred(
                   `.pred_ae > 3`,
                   levels = levels(clients$adverse),
@@ -420,17 +420,17 @@ confusion_matrix %>%
 confusion_matrix %>% summary()
 ```
 
-# SHAP value is not done yet. It is done if we can take the whole clients set (not dividing between train and test). But if we want to use it on test only, needs more work. (see pictures on slack for the whole client set). 
-
+# SHAP value business
 ```{r}
 fulltest <- testing(init)
 fulltrain <- training(init)
 ```
 ```{r}
 fulltrain %>% slice (343)
-fulltest%>% slice(80)
+fulltest %>% slice(80)
 ```
 
+Break-down profile of New York
 ```{r}
 library(DALEX)
 fit_parsnip <- trained_wflow %>% extract_fit_parsnip
@@ -448,6 +448,7 @@ ex %>%
 fit_parsnip %>% predict(train %>% slice(343), type = "prob")
 ```
 
+Break-down profile of NC
 ```{r}
 ex %>%
   predict_parts(test %>% slice(80)) %>%
@@ -455,42 +456,10 @@ ex %>%
 
 fit_parsnip %>% predict(test %>% slice(80), type = "prob")
 ```
-```{r}
-shap <- predict_parts(explainer = ex,
-                      new_observation = train %>% slice(343),
-                                 type = "break_down"
-                                  )
-                               
-plot(shap, show_boxplots = FALSE)
-```
 
-```{r}
-shap <- predict_parts(explainer = ex,
-                      new_observation = test %>% slice(80),
-                                 type = "break_down")
-```
-
-```{r}
-shap %>%
-  mutate(contribution = - contribution) %>%
-  plot()
-```
-```{r}
-                               
-plot(shap, show_boxplots = FALSE)
-```
 # FOr first one 
-```{r}
-shap <- predict_parts(explainer = ex,
-                      new_observation = train,
-                                 type = "shap",
-                                  B = 25,
-                                  N = 400)
-                               
-plot(shap, show_boxplots = FALSE)
-```
-
-```{r cache = TRUE}
+Shap new york
+```{r shapNY, cache = TRUE}
 shap <- predict_parts(explainer = ex,
                       new_observation = train %>% slice(343),
                                  type = "shap",
@@ -498,7 +467,9 @@ shap <- predict_parts(explainer = ex,
                                
 plot(shap, show_boxplots = FALSE)
 ```
-```{r cache = TRUE}
+
+Shap NC
+```{r shapNC, cache = TRUE}
 shap <- predict_parts(explainer = ex,
                       new_observation = test %>% slice(80),
                                  type = "shap",
@@ -507,9 +478,15 @@ shap <- predict_parts(explainer = ex,
 plot(shap, show_boxplots = FALSE)
 ```
 
-```{r}
-vip(fit_parsnip, fill = hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE))
-```
-```{r}
-hcl.colors(10, palette = "viridis", alpha = NULL, rev = FALSE, fixup = TRUE)
+```{r fig.width = 10, dpi = 400}
+trained_wflow %>%
+  extract_fit_engine() %>%
+  importance() %>%
+  as_tibble_row() %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Importance") %>%
+  slice_max(Importance, n = 10) %>%
+  ggplot(aes(y = fct_reorder(factor(Variable), Importance), x = Importance, fill = fct_reorder(factor(Variable), Importance))) +
+  geom_col() +
+  scale_fill_brewer(palette = "Spectral") +
+  guides(fill = "none") + labs(y = "Variable", x = "Importance")
 ```
