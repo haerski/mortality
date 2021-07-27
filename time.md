@@ -97,14 +97,6 @@ deaths %>%
 
 One thing to note, there is no death data for zipcodes 202, 204, 753, 772 (which is fine, since there is no zip_data for those either).
 
-Let's join client data and deaths (maybe not?)
-
-```r
-# clients %<>%
-#   left_join(deaths, by = "zip3") %>%
-#   relocate(yw, zip_deaths, .after = "zip3")
-```
-
 Next we look at the deaths only
 
 ```r
@@ -208,9 +200,9 @@ weekly_data %>%
 ## Warning: Removed 12 row(s) containing missing values (geom_path).
 ```
 
-![plot of chunk unnamed-chunk-10](figures/time-unnamed-chunk-10-1.png)
+![plot of chunk unnamed-chunk-9](figures/time-unnamed-chunk-9-1.png)
 
-We add a column called `smoothed_ae`. We will classify clients based on this number.
+We add a column called `smoothed_ae`. We may classify clients based on this number.
 
 ```r
 weekly_data <-
@@ -229,11 +221,10 @@ weekly_data %>%
   summarize(avg_ae = mean(smoothed_ae), sd = sd(smoothed_ae)) %>%
   ggplot(aes(x = date, y = avg_ae)) +
   geom_line() +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  geom_point()
+  geom_hline(yintercept = 1, linetype = "dashed")
 ```
 
-![plot of chunk unnamed-chunk-12](figures/time-unnamed-chunk-12-1.png)
+![plot of chunk unnamed-chunk-11](figures/time-unnamed-chunk-11-1.png)
 
 ```r
   # geom_errorbar(aes(ymin = avg_ae - sd, ymax = avg_ae + sd))
@@ -249,7 +240,7 @@ weekly_data %>%
   ggplot(aes(x = date, y = avg_deaths)) + geom_line()
 ```
 
-![plot of chunk unnamed-chunk-13](figures/time-unnamed-chunk-13-1.png)
+![plot of chunk unnamed-chunk-12](figures/time-unnamed-chunk-12-1.png)
 
 Let compute the 25th percentile AE of each week. We will pick the threshold for `adverse` based on this.
 
@@ -262,28 +253,75 @@ weekly_data %>%
       `25` = quantile(smoothed_ae, 0.25),
       `50` = quantile(smoothed_ae, 0.50)
   ) %>%
-  pivot_longer(-date, names_to = "nth", values_to = "percentile") %>%
-  ggplot(aes(x = date, y = percentile, color = nth)) +
+  pivot_longer(-date, names_to = "pth", values_to = "smoothed_ae") %>%
+  ggplot(aes(x = date, y = smoothed_ae, color = pth)) +
   geom_line() +
   geom_hline(yintercept = 1, linetype = "dashed")
 ```
 
-![plot of chunk unnamed-chunk-14](figures/time-unnamed-chunk-14-1.png)
+![plot of chunk unnamed-chunk-13](figures/time-unnamed-chunk-13-1.png)
 
-We will choose "smoothed 3 month AE" > 2 as "Adverse".
+Maybe there is a better number to look at than smoothed ae. Let's shrink smoothed ae based on the log(Volume * average qx). This gives us some kind of a measure of client size and mortality.
 
 ```r
-weekly_data <-
+client_shrinkage <-
   weekly_data %>%
+  summarize(dep_var = first(volume * avg_qx)) %>%
+  mutate(shrinkage = rescale(log(dep_var), to = c(0.3, 1)))
+
+ggplot(client_shrinkage, aes(x = dep_var)) + geom_density() + scale_x_log10()
+```
+
+![plot of chunk unnamed-chunk-14](figures/time-unnamed-chunk-14-1.png)
+
+```r
+processed_data <-
+  weekly_data %>%
+  left_join(client_shrinkage, by = "client") %>%
   ungroup() %>%
-  mutate(class = factor(if_else(smoothed_ae > 2, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = smoothed_ae)
+  mutate(shrunk_ae = smoothed_ae * shrinkage, .after = smoothed_ae)
+
+processed_data %>%
+  group_by(date) %>%
+  summarize(avg_ae = mean(shrunk_ae)) %>%
+  ggplot(aes(date, avg_ae)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-14](figures/time-unnamed-chunk-14-2.png)
+
+```r
+processed_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(
+      `12.5` = quantile(shrunk_ae, 0.125),
+      `25` = quantile(shrunk_ae, 0.25),
+      `50` = quantile(shrunk_ae, 0.50)
+  ) %>%
+  pivot_longer(-date, names_to = "pth", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = pth)) +
+  geom_line() +
+  geom_hline(yintercept = 2.5, linetype = "dashed")
+```
+
+![plot of chunk unnamed-chunk-14](figures/time-unnamed-chunk-14-3.png)
+
+
+
+We will choose "smoothed, shrunk 3 month AE" > 2.5 as "Adverse".
+
+```r
+processed_data <-
+  processed_data %>%
+  ungroup() %>%
+  mutate(class = factor(if_else(shrunk_ae > 2.5, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = shrunk_ae)
 ```
 
 
 How many clients are adverse each week?
 
 ```r
-weekly_data %>%
+processed_data %>%
   group_by(date) %>%
   summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
   ggplot(aes(x = date, y = prop_adverse)) + geom_line()
@@ -303,21 +341,11 @@ weekly_data %>%
   ggplot(aes(x = yw)) + geom_line(aes(y = rolling_ae)) + geom_line(aes(y = zip_deaths), color = "red")
 ```
 
-```
-## Error in FUN(X[[i]], ...): object 'rolling_ae' not found
-```
-
-![plot of chunk unnamed-chunk-17](figures/time-unnamed-chunk-17-1.png)
-
 Cool. Let's make it into a `tsibble` (time series tibble)
 
 ```r
 weekly_data %<>%
   as_tsibble(key = client, index = yw)
-```
-
-```
-## Error in as_tsibble(., key = client, index = yw): could not find function "as_tsibble"
 ```
 
 
