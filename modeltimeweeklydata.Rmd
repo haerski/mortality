@@ -17,7 +17,7 @@ library(lubridate)
 ```
 
 Get weeklydata from time.Rmd
-```{r}
+```{r eval= FALSE}
 clients <-weekly_data %>%
   mutate(year = year(yw))%>%
   mutate(week = week(yw))
@@ -28,16 +28,16 @@ clients <-
   relocate(date, .after = client)%>%
   select(-yw,-week,-year)
 ```
-```{r}
+```{r eval= FALSE}
 clients<- clients%>%
   drop_na()%>%
   rename(ae = rolling_ae)%>%
   select(-zip_deaths)
 ```
-```{r}
+```{r eval= FALSE}
 clients
 ```
-```{r}
+```{r eval= FALSE}
 write_feather(clients, "weeklydata.feather")
 ```
 ```{r}
@@ -182,7 +182,7 @@ xgboost_spec <-
 ```
 
 # workflow 
-```{r}
+```{r eval= FALSE}
 #cannot fit
 wflw_neural <- workflow() %>%
     add_model(
@@ -191,7 +191,7 @@ wflw_neural <- workflow() %>%
     add_recipe(rec_obj) %>%
     fit(data = training(splits))
 ```
-```{r}
+```{r eval= FALSE}
 #take a lot time()
 wflw_svmpoly <- workflow() %>%
     add_model(
