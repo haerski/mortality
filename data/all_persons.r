@@ -10,7 +10,7 @@ read_data <- function(n) {
 
   dies <-
     exp %>%
-    filter(death == 1) %>%
+    filter(death > 0) %>%
     select(client, participant, week, month, year)
   aug_per <-
     per %>%
@@ -21,6 +21,12 @@ read_data <- function(n) {
 
 all_persons <- (1:10) %>% map_dfr(read_data)
 
+all_persons <-
+  all_persons %>%
+  group_by(client,participant) %>%
+  arrange(year, week, .by_group = TRUE) %>%
+  slice_head()
+
 qx_table <- read_csv("soa_base_2017.csv")
 
 all_persons <-
@@ -29,4 +35,4 @@ all_persons <-
   relocate(qx, .after = collar)
 
 # This generates a data frame with all individual and date of death (NULL if they don't die)
-write_feather(all_persons, "simulation_data/all_persons.feather")
+write_feather(all_persons %>% ungroup(), "simulation_data/all_persons.feather")
