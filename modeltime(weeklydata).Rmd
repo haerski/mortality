@@ -44,6 +44,7 @@ write_feather(clients, "weeklydata.feather")
 clients <-read_feather("weeklydata.feather")%>%
   mutate(client = as.factor(client))%>%
   filter(year(date)!=2019)%>%
+  mutate (POP = log(POP))%>%
   distinct()
 ```
 
@@ -64,7 +65,7 @@ split
 It is not good 
 ```{r}
 model_spec <- window_reg(
-        window_size     = 12,
+        window_size     = "6 months",
         id = "client"
     ) %>%
     # Extra parameters passed as: set_engine(...)
@@ -72,7 +73,7 @@ model_spec <- window_reg(
         engine          = "window_function",
         #window_function = median,
         na.rm           = TRUE,
-        window_function = ~ tail(.x, 8),
+        window_function = ~ tail(.x, 40),
     )
 
 # Fit Spec
@@ -199,6 +200,7 @@ wflw_svmpoly <- workflow() %>%
     add_recipe(rec_obj) %>%
     fit(data = training(splits))
 ```
+
 ```{r}
 wflw_rf <- workflow() %>%
     add_model(
