@@ -282,6 +282,105 @@ processed_data %>%
   ggplot(aes(x = date, y = prop_adverse)) + geom_line()
 ```
 
+## Modeling (Maybe will have to be redone.....)
+We start with a random forest. Later we will compare other models...
+
+We start with a split. We choose a training until "2020-05-31", testing 13 weeks from that date.
+```{r}
+cv_split <-
+  processed_data %>%
+  time_series_split(
+      date_var = date,
+      initial = 13,
+      assess = 13,
+      cumulative = TRUE,
+      slice = 44)
+
+cv_split %>%
+  analysis() %>%
+  summarize(max(date))
+```
+
+Define a model
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+forest_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, date, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, zip_deaths) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+trained_wf <-
+  forest_wf %>%
+  fit(analysis(cv_split))
+
+preds <- trained_wf %>%
+  predict(assessment(cv_split), type = "prob") %>%
+  bind_cols(assessment(cv_split))
+
+preds %>%
+  group_by(date) %>%
+  summarize(sens = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = sens)) + geom_line()
+```
+
+
+```{r}
+
+```
+
+
+
+
+Create an ARIMA specification
+```{r}
+forecaster <-
+  prophet_reg(growth = "logistic", logistic_floor = 0, logistic_cap = 1)
+```
+
+
+Forecast...
+```{r}
+client_1_train <-
+  analysis(cv_split) %>%
+  filter(date > "2020-04-15", client == 1)
+
+fit_forecaster <-
+  forecaster %>% fit(zip_deaths ~ date, data = client_1_train)
+
+fit_table <- as_modeltime_table(list(foo = fit_forecaster))
+
+fit_table %>%
+  modeltime_forecast(actual_data = client_1_train, h = "13 weeks") %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+
+trained_foreacsters <-
+  analysis(cv_split) %>%
+  filter(date > "2020-03-15", client == 1) %>%
+  summarize(trained = list(fit(forecaster, zip_deaths ~ date, data = .))) %>%
+  mutate(forecast = 
+
+
+
+
+
+  group_by(client) %>%
+  summarize(trained = list(forecaster %>% fit(zip_deaths ~ date, data = cur_data())))
+```
+
+
+
+
+
 
 
 # BELOW IS OLD, USE AT YOUR OWN RISK!!!!
