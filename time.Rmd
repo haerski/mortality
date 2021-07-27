@@ -282,6 +282,132 @@ processed_data %>%
   ggplot(aes(x = date, y = prop_adverse)) + geom_line()
 ```
 
+
+## Modeling (with tidyverts)
+```{r}
+library(tsibble)
+library(fable)
+
+data_tsibble <-
+  processed_data
+  # mutate(yw = yearweek(date), .before = date, .keep = "unused")
+
+# splits <-
+#   data_tsibble %>%
+#   filter(date >= "2020-03-15") %>%
+#   nest_by(date) %>%
+#   sliding_index(index = date,
+#                 lookback = weeks(12),
+#                 assess_stop = weeks(26))
+
+# split <- splits %>% pluck(1, 3)
+# train <- training(split) %>% unnest(data)
+# test <- testing(split) %>% unnest(data)
+train <-
+  processed_data %>%
+  filter(date <= "2021-01-01")
+
+test <-
+  processed_data %>%
+  filter(date > "2021-01-01" & date <= "2021-06-01")
+```
+
+```{r}
+forecast <-
+  train %>%
+  filter(date >= "2020-03-15") %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(zip_deaths)) %>%
+  forecast(h = "6 months")
+
+# foo %>%
+#   autoplot(train %>% bind_rows(test) %>% ungroup() %>% as_tsibble(index = date, key = client))
+foo <-
+  forecast %>%
+  index_by(date) %>%
+  summarize(fc_deaths = sum(.mean))
+
+bar <-
+  test %>%
+  as_tsibble(key = client, index = date) %>%
+  index_by(date) %>%
+  summarize(true_deaths = sum(zip_deaths))
+
+foo %>%
+  left_join(bar, by = "date") %>%
+  ggplot(aes(x = date)) + geom_line(aes(y = fc_deaths), color = "red") + geom_line(aes(y = true_deaths))
+```
+
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+forest_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+trained_wf <-
+  forest_wf %>%
+  fit(train)
+
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+trained_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+
+
+test %>%
+  bind_cols(predict(trained_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+
+trained_wf %>%
+  predict(forecasted_test) %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(sens = sens_vec(class, .pred_class), spec = spec_vec(class, .pred_class)) %>%
+  pivot_longer(sens:spec, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+
+trained_wf %>%
+  predict(test)
+%>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(sens = sens_vec(class, .pred_class), spec = spec_vec(class, .pred_class)) %>%
+  pivot_longer(sens:spec, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+
 ## Modeling (Maybe will have to be redone.....)
 We start with a random forest. Later we will compare other models...
 
@@ -333,9 +459,6 @@ preds %>%
 ```
 
 
-```{r}
-
-```
 
 
 
