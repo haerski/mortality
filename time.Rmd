@@ -1,6 +1,6 @@
 ```{r, setup, include=FALSE}
 knitr::opts_chunk$set(
-  fig.width = 6, fig.height = 6, dpi = 300, cache = TRUE, collapse = TRUE
+  fig.width = 6, fig.height = 6, dpi = 300, fig.path = "figures/time-"
 )
 ```
 
@@ -18,9 +18,8 @@ library(feather)
 library(magrittr)
 library(skimr)
 library(lubridate)
-library(tsibble)
-library(fable)
-library(feasts)
+library(timetk)
+library(modeltime)
 library(glue)
 library(slider)
 per <- read_feather("data/simulation_data/all_persons.feather")
@@ -74,9 +73,8 @@ Also, look at weekly deaths instead of deaths to date
 ```{r}
 deaths <-
   read_feather("data/deaths_zip3.feather") %>%
-  mutate(yw = yearweek(date)) %>%
-  select(-date) %>%
-  group_by(zip3, yw) %>%
+  mutate(date = ceiling_date(date, unit = "week")) %>%
+  group_by(zip3, date) %>%
   summarize(totdeaths = max(deaths)) %>%
   mutate(zip_deaths = totdeaths - lag(totdeaths, default = 0)) %>%
   select(-totdeaths) %>%
@@ -88,7 +86,7 @@ Let's see what it looks like in Atlanta and LA. We normalize by population.
 deaths %>%
   left_join(zip_data, by = "zip3") %>%
   filter(zip3 %in% c("303", "900")) %>%
-  ggplot(aes(x = yw, color = zip3)) +
+  ggplot(aes(x = date, color = zip3)) +
   geom_line(aes(y = zip_deaths / POP))
 ```
 
@@ -109,15 +107,6 @@ per %<>%
 ```
 
 2019 didn't have 53 weeks, so the deaths on week 53 in 2019 will be changed to death in week 1 of 2020.
-I tried to do this, but then it turns out that some individuals die many times!!!
-Let's fix this
-```{r}
-per %<>%
-  group_by(client, participant) %>%
-  arrange(year, week, by_group = TRUE) %>%
-  slice_head(n = 1) %>%
-  ungroup()
-```
 
 Now back to the 53 week business
 ```{r}
@@ -129,11 +118,12 @@ per %<>%
   rows_update(wk53, by = c("client", "participant"))
 ```
 
-The tibble `per` contains all the people that die and their deathweek. Everyone should die only once now! Let's convert the week and year into a yearweek object
+The tibble `per` contains all the people that die and their deathweek. Everyone should die only once now! Let's convert the week and year into the last date of that week.
+
 ```{r}
 per %<>%
   nest_by(week, year) %>%
-  mutate(yw = yearweek(glue("{year} w{week}")), .before = "week") %>%
+  mutate(date = ceiling_date(ymd(glue("{year}-01-01")) + weeks(week - 1), unit = "week")) %>%
   ungroup() %>%
   select(-week, -year) %>%
   unnest(cols = c(data))
@@ -149,17 +139,17 @@ no_deaths <-
   clients %>%
   anti_join(per, by = "client") %>%
   select(client) %>%
-  mutate(yw = yearweek("2019 w01"), claims = 0)
+  mutate(date = ceiling_date(ymd("2019-01-01"), unit = "week"), claims = 0)
 ```
 
 We compute face amount per week for each client. This number is 0 if the client has no deaths that week.
 ```{r}
 weekly_claims <-
   per %>%
-  group_by(yw, client) %>%
+  group_by(date, client) %>%
   summarize(claims = sum(FaceAmt), .groups = "drop") %>%
   bind_rows(no_deaths) %>%
-  complete(yw, client, fill = list(claims = 0))
+  complete(date, client, fill = list(claims = 0))
 ```
 
 We now have 65,369 rows, which is 131 weeks * 499 clients.
@@ -169,23 +159,103 @@ Let's merge everything.
 weekly_data <-
   clients %>%
   left_join(weekly_claims, by = c("client")) %>%
-  relocate(yw) %>%
+  relocate(date) %>%
   relocate(claims, .after = zip3) %>%
-  left_join(deaths, by = c("yw", "zip3")) %>%
+  left_join(deaths, by = c("date", "zip3")) %>%
   relocate(zip_deaths, .after = claims) %>%
-  mutate(zip_deaths = replace_na(zip_deaths, 0))
+  mutate(zip_deaths = replace_na(zip_deaths, 0), ae = claims / (expected / 52.18))
 ```
 
-We add a rolling AE number. This will be the AE for the 26 week prior to that week.
-TODO: Early 2019 is a bit broken, we should remove it.
+We add a rolling AE number. We will smooth the actual claims number of each week by taking a weighted average of actual claims in the 13 weeks prior. The weights come from a Gaussian distribution...
+The function `sliding_smoother` takes a vector and outputs a vector of smoothed values.
+
+The below picture show what the smoother does for claims of client 7. We also show a 3 month mean AE
 ```{r}
-weekly_data %<>%
+smoother <- function(x) { weighted.mean(x, dnorm(seq(-1, 0, length.out = length(x)), sd = 0.33)) }
+sliding_smoother <-
+  slidify(smoother, .period = 13, .align = "right")
+
+sliding_mean <-
+  slidify(mean, .period = 13, .align = "right")
+
+
+weekly_data %>%
+  filter(client == 7) %>%
+  ggplot(aes(x = date)) +
+  # geom_line(aes(y = sliding_mean(claims)), color = "red") +
+  # geom_line(aes(y = smooth_vec(claims, period = 13)), color = "blue") +
+  geom_line(aes(y = sliding_smoother(ae)), color = "magenta") +
+  geom_line(aes(y = sliding_mean(ae)), color = "red") +
+  geom_line(aes(y = ae), linetype = 2)
+```
+
+We add a column called `smoothed_ae`. We will classify clients based on this number.
+```{r}
+weekly_data <-
+  weekly_data %>%
   group_by(client) %>%
-  mutate(rolling_ae = slide_index_dbl(claims, yw, sum, .before = 52, .complete = TRUE) / (first(expected) / 1)) %>%
-  relocate(rolling_ae, .before = size) %>%
-  ungroup() %>%
+  mutate(smoothed_ae = sliding_smoother(ae), .before = size) %>%
   drop_na()
 ```
+
+We plot the average AE for each week. This is pretty crazy...
+```{r}
+weekly_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(avg_ae = mean(smoothed_ae), sd = sd(smoothed_ae)) %>%
+  ggplot(aes(x = date, y = avg_ae)) +
+  geom_line() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point()
+  # geom_errorbar(aes(ymin = avg_ae - sd, ymax = avg_ae + sd))
+```
+
+Weekly normalized deaths in the zipcodes of our clients... I had hoped that this curve looked the same as the AE curve, but I guess it doesn't.
+```{r}
+weekly_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(avg_deaths = mean(zip_deaths / POP)) %>%
+  ggplot(aes(x = date, y = avg_deaths)) + geom_line()
+```
+
+Let compute the 25th percentile AE of each week. We will pick the threshold for `adverse` based on this.
+```{r}
+weekly_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(
+      `12.5` = quantile(smoothed_ae, 0.125),
+      `25` = quantile(smoothed_ae, 0.25),
+      `50` = quantile(smoothed_ae, 0.50)
+  ) %>%
+  pivot_longer(-date, names_to = "nth", values_to = "percentile") %>%
+  ggplot(aes(x = date, y = percentile, color = nth)) +
+  geom_line() +
+  geom_hline(yintercept = 1, linetype = "dashed")
+```
+
+We will choose "smoothed 3 month AE" > 2 as "Adverse".
+```{r}
+weekly_data <-
+  weekly_data %>%
+  ungroup() %>%
+  mutate(class = factor(if_else(smoothed_ae > 2, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = smoothed_ae)
+```
+
+
+How many clients are adverse each week?
+```{r}
+weekly_data %>%
+  group_by(date) %>%
+  summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
+  ggplot(aes(x = date, y = prop_adverse)) + geom_line()
+```
+
+
+
+# BELOW IS OLD, USE AT YOUR OWN RISK!!!!
 
 Let's see if this makes sense. We plot the rolling AE and deaths in the zip code for client 7.
 ```{r}
@@ -209,7 +279,7 @@ We train on the past times.
 To predict, we first need to forecast `weekly_deaths`, and then use the model.
 
 Here is one way of forecasting with the `fable` package.
-```{r}
+```{r eval = FALSE}
 weekly_data %>%
   filter(client == 2, yw < yearweek("2021 w1")) %>%
   model(arima = ARIMA(zip_deaths)) %>%
@@ -218,7 +288,7 @@ weekly_data %>%
 ```
 
 We will preprocess the data a little bit.
-```{r}
+```{r eval = FALSE}
 forest_data <-
   weekly_data %>%
   mutate(class = fct_recode(factor(rolling_ae < 3), adverse = "FALSE", `not adverse` = "TRUE"), .after = yw) %>%
@@ -226,7 +296,7 @@ forest_data <-
 ```
 
 Pick a training and validation set
-```{r}
+```{r eval = FALSE}
 start <- yearweek("2020 w26")
 lookback <- 52
 end <- 26
@@ -242,7 +312,7 @@ testing <-
 
 
 First let's do a random forest with default parameters
-```{r}
+```{r eval = FALSE}
 forest_spec <-
   rand_forest(trees = 1000) %>%
   set_engine("ranger", num.threads = 8, seed = 123456789) %>%
@@ -265,7 +335,7 @@ forest_fit <-
 ```
 
 Now we estimate deaths for the next 6 weeks
-```{r}
+```{r eval = FALSE}
 forecasted_deaths <-
   training %>%
   model(
@@ -296,7 +366,7 @@ Let's use the forecasts from IHME.
 
 
 Creating splits for each week
-```{r}
+```{r eval = FALSE}
 forest_data %>%
   arrange(yw) %>%
   sliding_index(yw, lookback = 12, assess_stop = 26)
