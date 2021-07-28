@@ -560,6 +560,99 @@ test %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 ```
 
+### smoothed_deaths with XGBoost
+
+We will try to predict the class three months in the future using a forecasted `smoothed_deaths` and `ihme_deaths`.
+
+We will use an XGBoost model.
+```{r}
+xgboost_recipe <-
+  recipe(formula = class ~ ., data = processed_data) %>%
+  step_rm(zip3, client, claims, zip_deaths, shrunk_ae, ae, dep_var, shrinkage) %>%
+  step_rm(STATE_NAME, date) %>%
+  step_zv(all_predictors())
+
+xgboost_spec <-
+  # boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(), loss_reduction = tune(), sample_size = tune()) %>%
+  boost_tree() %>%
+  set_mode("classification") %>%
+  set_engine("xgboost")
+
+xgboost_workflow <-
+  workflow() %>%
+  add_recipe(xgboost_recipe) %>%
+  add_model(xgboost_spec)
+```
+
+
+First we forecast `smoothed_deaths`.
+```{r}
+start <- ymd("2021-01-01")
+end <- ymd("2020-04-04")
+
+forecast <-
+  processed_data %>%
+  filter(date >= "2020-03-15" & date <= start) %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+We plot it to see if it makes sense
+```{r}
+forecast %>%
+  filter(client == 42) %>%
+  autoplot(processed_data %>% as_tsibble(index = date, key = client) %>% filter(client == 42))
+```
+
+Substitute actual deaths after `start` by the forecasted ones
+```{r}
+future <-
+  forecast %>%
+  as_tibble() %>%
+  select(date, client, .mean) %>%
+  # inner_join(processed_data, by = c("date", "client")) %>%
+  # select(-smoothed_deaths) %>%
+  rename(smoothed_deaths = .mean)
+
+forecasted_data <-
+  processed_data %>%
+  rows_update(future, by = c("date", "client"))
+```
+
+Create the `rsample` object. We will test on one week, namely the week of Apr 4th.
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(date <= start) %>%
+  pull(rowname) %>%
+  as.integer()
+
+test_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(date == ceiling_date(end, unit = "week")) %>%
+  pull(rowname) %>%
+  as.integer()
+
+split <- make_splits(list(analysis = train_idx, assessment = test_idx), forecasted_data)
+rset <- manual_rset(list(split), ids = c("Split 1"))
+```
+
+Fit and test
+```{r}
+xgboost_workflow %>%
+  fit_resamples(
+      resamples = rset,
+      control = control_resamples(save_pred = TRUE))
+
+xgboost_workflow %>%
+  fit(analysis(split))
+```
+
+
+
 
 
 # BELOW IS ALSO BAD, WILL DELETE SOON!
