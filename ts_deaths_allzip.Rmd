@@ -1,0 +1,177 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(lubridate)
+library(xgboost)
+library(modeltime)
+library(timetk)
+library(earth)
+```
+
+
+
+```{r}
+ts_deaths <- read_feather("data/deaths_zip3.feather")
+ts_deaths
+
+```
+
+```{r}
+per <- read_feather("data/simulation_data/all_persons.feather")
+```
+
+```{r}
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+```
+
+
+
+We can add some demographic information based on zip3.
+```{r}
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+```
+There seems to be some clients with some zip codes that we cannot deal with. These are the ones
+```{r}
+clients %>%
+  anti_join(zip_data, by = "zip3") %>%
+  select(zip3)
+```
+
+```{r}
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+
+```{r}
+ts_deaths_clients <- merge(clients, ts_deaths, by = 'zip3', all.x= TRUE)
+```
+
+```{r}
+sample_n_groups = function(grouped_df, size, replace = FALSE, weight=NULL) {
+  grp_var <- grouped_df %>% 
+    groups %>%
+    unlist %>% 
+    as.character
+  random_grp <- grouped_df %>% 
+    summarise() %>% 
+    sample_n(size, replace, weight) %>% 
+    mutate(unique_id = 1:NROW(.))
+  grouped_df %>% 
+    right_join(random_grp, by=grp_var) %>% 
+    group_by_(grp_var) 
+}
+```
+
+```{r}
+set.seed(421)
+data1<-ts_deaths_clients %>% group_by(zip3) %>% sample_n_groups(3) 
+```
+```{r}
+data1 %>%
+  group_by(zip3) %>%
+  plot_time_series(
+    .date_var    = date, 
+    .value       = deaths,
+    .facet_ncol  = 3,
+    .interactive = FALSE
+  )
+  
+```
+
+
+
+
+```{r}
+splits <- ts_deaths_clients %>% time_series_split(assess = "3 months", cumulative = TRUE)
+splits
+```
+
+```{r}
+rec_obj <- recipe(deaths ~ date+zip3, training(splits)) %>%
+    step_mutate(ID = droplevels(zip3)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date) %>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)
+
+#summary(prep(rec_obj))
+```
+
+```{r}
+# Workflow
+wflw_xgb <- workflow() %>%
+    add_model(
+        boost_tree() %>% set_engine("xgboost")
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(training(splits))
+
+wflw_xgb
+```
+```{r}
+model_tbl <- modeltime_table(
+    wflw_xgb
+)
+```
+
+```{r}
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id  = "zip3"
+    )
+
+calib_tbl
+```
+```{r}
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+

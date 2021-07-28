@@ -1,0 +1,155 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(lubridate)
+library(xgboost)
+library(modeltime)
+library(timetk)
+library(earth)
+```
+
+
+
+```{r}
+ts_deaths <- read_feather("data/deaths_zip3.feather")
+glimpse(ts_deaths)
+
+```
+
+```{r}
+weekly_deaths <- ts_deaths %>% 
+  mutate(week=week(date),year=year(date)) %>% 
+  group_by(zip3,year,week) %>% 
+summarise(deaths=sum(deaths))
+```
+```{r}
+ts_deaths_year<- ts_deaths %>% 
+  mutate(year=year(date))
+```
+
+
+```{r}
+ts_011<- ts_deaths %>% filter(zip3=="154")
+```
+
+
+
+```{r}
+ts_011 %>% 
+   plot_time_series(date, deaths)
+```
+
+```{r}
+splits <- initial_time_split(ts_011, prop = 0.8)
+```
+
+
+```{r}
+model_fit_arima_no_boost <- arima_reg() %>%
+    set_engine(engine = "auto_arima") %>%
+    fit(deaths ~ date, data = training(splits))
+```
+```{r}
+model_fit_arima_boosted <- arima_boost(
+    min_n = 2,
+    learn_rate = 0.015
+) %>%
+    set_engine(engine = "auto_arima_xgboost") %>%
+    fit(deaths ~ date + as.numeric(date) + factor(month(date, label = TRUE), ordered = F),
+        data = training(splits))
+```
+```{r}
+model_fit_ets <- exp_smoothing() %>%
+    set_engine(engine = "ets") %>%
+    fit(deaths ~ date, data = training(splits))
+```
+```{r}
+model_fit_prophet <- prophet_reg() %>%
+    set_engine(engine = "prophet") %>%
+    fit(deaths ~ date, data = training(splits))
+```
+```{r}
+model_fit_lm <- linear_reg() %>%
+    set_engine("lm") %>%
+    fit(deaths ~ as.numeric(date) + factor(month(date, label = TRUE), ordered = FALSE),
+        data = training(splits))
+```
+
+```{r}
+model_spec_mars <- mars(mode = "regression") %>%
+    set_engine("earth") 
+
+recipe_spec <- recipe(deaths ~ date, data = training(splits)) %>%
+    step_date(date, features = "month", ordinal = FALSE) %>%
+    step_mutate(date_num = as.numeric(date)) %>%
+    step_normalize(date_num) %>%
+    step_rm(date)
+  
+wflw_fit_mars <- workflow() %>%
+    add_recipe(recipe_spec) %>%
+    add_model(model_spec_mars) %>%
+    fit(training(splits))
+```
+
+```{r}
+models_tbl <- modeltime_table(
+    model_fit_arima_no_boost,
+    model_fit_arima_boosted,
+    model_fit_ets,
+    model_fit_prophet,
+    model_fit_lm,
+    wflw_fit_mars
+)
+
+models_tbl
+```
+```{r}
+calibration_tbl <- models_tbl %>%
+    modeltime_calibrate(new_data = testing(splits))
+
+calibration_tbl
+```
+```{r}
+calibration_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = ts_011
+    ) %>%
+    plot_modeltime_forecast(
+      .legend_max_width = 25, # For mobile screens
+      
+    )
+```
+```{r}
+calibration_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = ts_011
+    ) %>%
+    plot_modeltime_forecast(
+      .legend_max_width = 25, # For mobile screens
+      
+    )
+```
+```{r}
+calibration_tbl %>%
+    modeltime_accuracy() %>%
+    table_modeltime_accuracy()
+```
+```{r}
+refit_tbl <- calibration_tbl %>%
+    modeltime_refit(data = ts_011)
+
+refit_tbl %>%
+    modeltime_forecast(h = "1 months", actual_data = ts_011) %>%
+    plot_modeltime_forecast(
+      .legend_max_width = 25, # For mobile screens
+    )
+```
+
