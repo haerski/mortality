@@ -202,13 +202,13 @@ weekly_data %>%
 
 ![plot of chunk unnamed-chunk-9](figures/time-unnamed-chunk-9-1.png)
 
-We add a column called `smoothed_ae`. We may classify clients based on this number.
+We add a column called `smoothed_ae` and `smoothed_deaths`.
 
 ```r
 weekly_data <-
   weekly_data %>%
   group_by(client) %>%
-  mutate(smoothed_ae = sliding_smoother(ae), .before = size) %>%
+  mutate(smoothed_ae = sliding_smoother(ae), smoothed_deaths = sliding_smoother(zip_deaths), .before = size) %>%
   drop_na()
 ```
 
@@ -328,6 +328,478 @@ processed_data %>%
 ```
 
 ![plot of chunk unnamed-chunk-16](figures/time-unnamed-chunk-16-1.png)
+
+
+# Modeling (with tidyverts)
+
+## Case study: Jan 1st 2021
+
+### ARIMA on zip_deaths + random forest
+
+We will travel back in time. We will attempt to predict six months worth of "averse" variables for all clients.
+
+```r
+library(tsibble)
+library(fable)
+
+data_tsibble <-
+  processed_data
+  # mutate(yw = yearweek(date), .before = date, .keep = "unused")
+
+# splits <-
+#   data_tsibble %>%
+#   filter(date >= "2020-03-15") %>%
+#   nest_by(date) %>%
+#   sliding_index(index = date,
+#                 lookback = weeks(12),
+#                 assess_stop = weeks(26))
+
+# split <- splits %>% pluck(1, 3)
+# train <- training(split) %>% unnest(data)
+# test <- testing(split) %>% unnest(data)
+train <-
+  processed_data %>%
+  filter(date <= "2021-01-01")
+
+test <-
+  processed_data %>%
+  filter(date > "2021-01-01" & date <= "2021-06-01")
+```
+
+Here we will manually forecast future `zip_deaths` using a fully default ARIMA forecaster. Maybe we should actually preduct a smoothed version of `zip_deaths`???
+We plot total deaths vs total forecasted deaths (in the zip codes of our clients). It's not great but it's something...
+
+```r
+forecast <-
+  train %>%
+  filter(date >= "2020-03-15") %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(zip_deaths)) %>%
+  forecast(h = "6 months")
+
+foo <-
+  forecast %>%
+  index_by(date) %>%
+  summarize(fc_deaths = sum(.mean))
+
+bar <-
+  test %>%
+  as_tsibble(key = client, index = date) %>%
+  index_by(date) %>%
+  summarize(true_deaths = sum(zip_deaths))
+
+foo %>%
+  left_join(bar, by = "date") %>%
+  ggplot(aes(x = date)) + geom_line(aes(y = fc_deaths), color = "red") + geom_line(aes(y = true_deaths))
+```
+
+```
+## Warning: Removed 4 row(s) containing missing values (geom_path).
+```
+
+![plot of chunk unnamed-chunk-18](figures/time-unnamed-chunk-18-1.png)
+
+We will train a forest on all the data prior to Jan 1st 2021
+
+```r
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+forest_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+trained_wf <-
+  forest_wf %>%
+  fit(train)
+```
+
+We substitute `zip_deaths` by the forecasted version of `zip_deaths` and predict.
+We plot the `roc_auc` of our predictions.
+
+```r
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+trained_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-20](figures/time-unnamed-chunk-20-1.png)
+
+How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
+Doesn't look too bad. Maybe a random forest is not the best model ?
+
+```r
+test %>%
+  bind_cols(predict(trained_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-21](figures/time-unnamed-chunk-21-1.png)
+
+### Change the death_zip variable
+
+We will use a smoothed `zip_death` variable instead!
+
+```r
+forest_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, zip_deaths) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+trained_wf <-
+  forest_wf %>%
+  fit(train)
+```
+
+We substitute `smoothed_deaths` by the forecasted version of `smoothed_deaths` and predict.
+We plot the `roc_auc` of our predictions.
+
+```r
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-smoothed_deaths) %>%
+  rename(smoothed_deaths = .mean)
+
+trained_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-23](figures/time-unnamed-chunk-23-1.png)
+
+Again, we compare with the true value of `smoothed_deaths`. It's much closer!!!!
+
+```r
+test %>%
+  bind_cols(predict(trained_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-24](figures/time-unnamed-chunk-24-1.png)
+
+
+### Using IHME forecasts
+
+We will use a more trustworthy forecast than our naive ARIMA...
+This will require some data wrangling 🥴 
+
+We start by loading state name and FIPS codes
+
+```r
+states <-
+  read_delim("data/state.txt", delim = "|") %>%
+  select(STATE, STATE_NAME)
+```
+
+```
+## Rows: 57 Columns: 4
+```
+
+```
+## ── Column specification ───────────────────────────────────────────────────
+## Delimiter: "|"
+## chr (4): STATE, STUSAB, STATE_NAME, STATENS
+```
+
+```
+## 
+## ℹ Use `spec()` to retrieve the full column specification for this data.
+## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+```
+
+
+We augment the main dataset by adding the state name
+
+```r
+zip_to_state <-
+  read_csv("data/zcta_county_rel_10.txt") %>%
+  select(ZCTA5, STATE) %>%
+  mutate(zip3 = str_sub(ZCTA5, 1, 3), .keep = "unused") %>%
+  group_by(zip3) %>%
+  count(STATE, sort = TRUE) %>%
+  slice_head() %>%
+  ungroup() %>%
+  left_join(states, by = "STATE") %>%
+  select(-STATE, -n)
+```
+
+```
+## Rows: 44410 Columns: 24
+```
+
+```
+## ── Column specification ───────────────────────────────────────────────────
+## Delimiter: ","
+## chr  (4): ZCTA5, STATE, COUNTY, GEOID
+## dbl (20): POPPT, HUPT, AREAPT, AREALANDPT, ZPOP, ZHU, ZAREA, ZAREALAND...
+```
+
+```
+## 
+## ℹ Use `spec()` to retrieve the full column specification for this data.
+## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+```
+
+```r
+processed_data <-
+  processed_data %>%
+  nest_by(zip3) %>%
+  left_join(zip_to_state, by = "zip3") %>%
+  unnest(cols = c(data))
+```
+
+Next we read the data from IHME as of Dec 23 2020
+
+```r
+ihme <-
+  read_csv("data/2020_12_23/reference_hospitalization_all_locs.csv") %>%
+  rename(STATE_NAME = location_name) %>%
+  semi_join(processed_data, by = "STATE_NAME") %>%
+  select(STATE_NAME, date, deaths_mean) %>%
+  mutate(date = ceiling_date(date, unit = "week")) %>%
+  group_by(STATE_NAME, date) %>%
+  summarize(ihme_deaths = sum(deaths_mean))
+```
+
+```
+## Rows: 165633 Columns: 73
+```
+
+```
+## ── Column specification ───────────────────────────────────────────────────
+## Delimiter: ","
+## chr   (8): location_name, hosp_data_type, deaths_data_type, mobility_d...
+## dbl  (64): location_id, V1, allbed_mean, allbed_lower, allbed_upper, I...
+## date  (1): date
+```
+
+```
+## 
+## ℹ Use `spec()` to retrieve the full column specification for this data.
+## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+```
+
+```
+## `summarise()` has grouped output by 'STATE_NAME'. You can override using the `.groups` argument.
+```
+
+Add to `processed_data`
+
+```r
+processed_data <-
+  processed_data %>%
+  left_join(ihme, by = c("date", "STATE_NAME")) %>%
+  ungroup() %>%
+  mutate(ihme_deaths = replace_na(ihme_deaths, 0))
+```
+
+Now we can go back to our usual training testing thing. Note that for IHME, the last forecasted date is `2021-04-04`.
+
+```r
+train <-
+  processed_data %>%
+  filter(date <= "2021-01-01")
+
+test <-
+  processed_data %>%
+  filter(date > "2021-01-01" & date <= "2021-04-04")
+```
+
+Now the usual workflow stuff
+
+```r
+forest_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(zip3, client, claims, zip_deaths, smoothed_ae, shrunk_ae, smoothed_deaths, ae, dep_var, shrinkage, STATE_NAME) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+trained_wf <-
+  forest_wf %>%
+  fit(train)
+```
+
+We plot the `roc_auc` of our predictions.
+
+```r
+trained_wf %>%
+  predict(test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-31](figures/time-unnamed-chunk-31-1.png)
+
+We can look at sensitivity and specificity
+
+```r
+test %>%
+  bind_cols(predict(trained_wf, test)) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, .pred_class),
+            spec_forecast = spec_vec(class, .pred_class)) %>%
+  pivot_longer(sens_forecast:spec_forecast, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+![plot of chunk unnamed-chunk-32](figures/time-unnamed-chunk-32-1.png)
+
+
+
+# BELOW IS ALSO BAD, WILL DELETE SOON!
+## Modeling (Maybe will have to be redone.....)
+We start with a random forest. Later we will compare other models...
+
+We start with a split. We choose a training until "2020-05-31", testing 13 weeks from that date.
+
+```r
+cv_split <-
+  processed_data %>%
+  time_series_split(
+      date_var = date,
+      initial = 13,
+      assess = 13,
+      cumulative = TRUE,
+      slice = 44)
+
+cv_split %>%
+  analysis() %>%
+  summarize(max(date))
+```
+
+Define a model
+
+```r
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+forest_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, date, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, zip_deaths) %>%
+  step_zv(all_predictors())
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(forest_recipe) %>%
+  add_model(forest_spec)
+
+trained_wf <-
+  forest_wf %>%
+  fit(analysis(cv_split))
+
+preds <- trained_wf %>%
+  predict(assessment(cv_split), type = "prob") %>%
+  bind_cols(assessment(cv_split))
+
+preds %>%
+  group_by(date) %>%
+  summarize(sens = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = sens)) + geom_line()
+```
+
+
+
+
+
+
+Create an ARIMA specification
+
+```r
+forecaster <-
+  prophet_reg(growth = "logistic", logistic_floor = 0, logistic_cap = 1)
+```
+
+
+Forecast...
+
+```r
+client_1_train <-
+  analysis(cv_split) %>%
+  filter(date > "2020-04-15", client == 1)
+
+fit_forecaster <-
+  forecaster %>% fit(zip_deaths ~ date, data = client_1_train)
+
+fit_table <- as_modeltime_table(list(foo = fit_forecaster))
+
+fit_table %>%
+  modeltime_forecast(actual_data = client_1_train, h = "13 weeks") %>%
+  plot_modeltime_forecast(.interactive = FALSE)
+
+
+trained_foreacsters <-
+  analysis(cv_split) %>%
+  filter(date > "2020-03-15", client == 1) %>%
+  summarize(trained = list(fit(forecaster, zip_deaths ~ date, data = .))) %>%
+  mutate(forecast = 
+
+
+
+
+
+  group_by(client) %>%
+  summarize(trained = list(forecaster %>% fit(zip_deaths ~ date, data = cur_data())))
+```
+
+
+
+
 
 
 
