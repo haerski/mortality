@@ -318,7 +318,7 @@ test <-
   filter(date > "2021-01-01" & date <= "2021-06-01")
 ```
 
-Here we will manually forecast future `zip_deaths` using a fully default ARIMA forecaster. Maybe we should actually preduct a smoothed version of `zip_deaths`???
+Here we will manually forecast future `zip_deaths` using a fully default ARIMA forecaster. Maybe we should actually predict a smoothed version of `zip_deaths`???
 We plot total deaths vs total forecasted deaths (in the zip codes of our clients). It's not great but it's something...
 ```{r cache = TRUE}
 forecast <-
@@ -402,6 +402,260 @@ test %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 ```
 
+### Other models
+
+Now, let's check other models and see if we can find better performance. First, we start with SVM_poly.
+
+```{r}
+
+svm_poly_spec <-
+  svm_poly(degree=5) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+common_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_zv(all_predictors())
+```
+
+
+```{r}
+svm_poly_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(svm_poly_spec)
+
+trained_svm_poly_wf <-
+  svm_poly_wf %>%
+  fit(train)
+```
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+trained_svm_poly_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
+Doesn't look too bad. Maybe a random forest is not the best model ?
+```{r}
+test %>%
+  bind_cols(predict(trained_svm_poly_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_svm_poly_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+Something is wrong with SVM poly. Let's try KNN. 
+
+```{r}
+
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+common_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_zv(all_predictors())
+```
+
+
+```{r}
+knn_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(knn_spec)
+
+trained_knn_wf <-
+  knn_wf %>%
+  fit(train)
+```
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+trained_knn_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
+Doesn't look too bad. Maybe a random forest is not the best model ?
+```{r}
+test %>%
+  bind_cols(predict(trained_knn_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_knn_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+It looks like KNN is good. 
+
+Let's check Neural Network now! 
+
+```{r}
+
+sln_spec <-
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+common_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_zv(all_predictors())
+```
+
+
+```{r}
+sln_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(sln_spec)
+
+trained_sln_wf <-
+  sln_wf %>%
+  fit(train)
+```
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+trained_sln_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
+Doesn't look too bad. Maybe a random forest is not the best model ?
+
+```{r}
+test %>%
+  bind_cols(predict(trained_sln_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_sln_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+
+
+Neural Network is horrible. Let's move to boosted trees. 
+
+```{r}
+
+bt_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = 100)
+
+common_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, date, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_zv(all_predictors())
+```
+
+
+```{r}
+bt_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(bt_spec)
+
+trained_bt_wf <-
+  bt_wf %>%
+  fit(train)
+```
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+trained_bt_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
+Doesn't look too bad. Maybe a random forest is not the best model ?
+```{r}
+test %>%
+  bind_cols(predict(trained_knn_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_knn_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+Boosted Trees is great! 
+
+
+
 ### Change the death_zip variable
 
 We will use a smoothed `zip_death` variable instead!
@@ -456,7 +710,6 @@ test %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 ```
 
-
 ### Using IHME forecasts
 
 We will use a more trustworthy forecast than our naive ARIMA...
@@ -489,6 +742,11 @@ processed_data <-
   left_join(zip_to_state, by = "zip3") %>%
   unnest(cols = c(data))
 ```
+
+
+
+
+
 
 Next we read the data from IHME as of Dec 23 2020
 ```{r}
@@ -559,6 +817,11 @@ test %>%
   pivot_longer(sens_forecast:spec_forecast, names_to = "metric", values_to = "value") %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 ```
+
+
+
+
+
 
 
 
