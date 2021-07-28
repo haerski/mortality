@@ -568,7 +568,7 @@ We will use an XGBoost model.
 ```{r}
 xgboost_recipe <-
   recipe(formula = class ~ ., data = processed_data) %>%
-  step_rm(zip3, client, claims, zip_deaths, shrunk_ae, ae, dep_var, shrinkage) %>%
+  step_rm(zip3, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, dep_var, shrinkage) %>%
   step_rm(STATE_NAME, date) %>%
   step_zv(all_predictors())
 
