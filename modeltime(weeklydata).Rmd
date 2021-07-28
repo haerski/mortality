@@ -1,0 +1,394 @@
+
+
+## Common data
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(timetk)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(dplyr)
+library(lubridate)
+```
+
+Get weeklydata from time.Rmd
+```{r eval= FALSE}
+clients <-weekly_data %>%
+  mutate(year = year(yw))%>%
+  mutate(week = week(yw))
+
+clients$date <- as.Date(paste(clients$week, clients$year, 'Sun'), '%U %Y %a')
+clients <- 
+  clients%>%
+  relocate(date, .after = client)%>%
+  select(-yw,-week,-year)
+```
+```{r eval= FALSE}
+clients<- clients%>%
+  drop_na()%>%
+  rename(ae = rolling_ae)%>%
+  select(-zip_deaths)
+```
+```{r eval= FALSE}
+clients
+```
+```{r eval= FALSE}
+write_feather(clients, "weeklydata.feather")
+```
+```{r}
+clients <-read_feather("weeklydata.feather")%>%
+  mutate(client = as.factor(client))%>%
+  filter(year(date)!=2019)%>%
+  mutate (POP = log(POP))%>%
+  distinct()
+```
+
+split
+```{r}
+#split
+  split
+  set.seed = 1234
+  splits <-  clients%>%time_series_split(initial = "6 months", assess = "6 months", cumulative = TRUE)
+  train = training(splits)
+  test = testing(splits)
+  #index <- unique(train$client)
+  #val <- sliding_index(training(splits), index)
+  
+  #crossval <- vfold_cv(training(splits), strata = zip3)
+```
+#window forest
+It is not good 
+```{r}
+model_spec <- window_reg(
+        window_size     = "6 months",
+        id = "client"
+    ) %>%
+    # Extra parameters passed as: set_engine(...)
+    set_engine(
+        engine          = "window_function",
+        #window_function = median,
+        na.rm           = TRUE,
+        window_function = ~ tail(.x, 40),
+    )
+
+# Fit Spec
+model_fit <- model_spec %>%
+    fit(ae ~ ., data = train)
+model_fit
+predict(model_fit, test)
+
+
+model_tbl <- modeltime_table(
+    model_fit)
+
+model_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+
+```
+
+#Compare only one predictor(date) with all predictors(as before), the latter has better results.
+#XGboost have the best result among all 7 model.
+
+We now gather our recipes and models.
+#recipe
+```{r}
+rec_obj <-
+    recipe(ae ~ ., data = training(splits)) %>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    #step_rm(adverse)%>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+    step_normalize(all_predictors(), -all_nominal())
+
+summary(prep(rec_obj))
+bake(prep(rec_obj),training(splits))
+```
+```{r}
+recipes <- list(rec_obj)
+```
+
+#engine
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+sln_spec <-
+  mlp() %>%
+  set_engine("nnet") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  #set_mode("classification")
+  set_mode("regression")
+xgboost_spec <-
+  boost_tree() %>%
+  set_engine("xgboost") %>%
+  #set_mode("classification")
+  set_mode("regression")
+```
+
+# workflow 
+```{r eval= FALSE}
+#cannot fit
+wflw_neural <- workflow() %>%
+    add_model(
+        sln_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+```
+```{r eval= FALSE}
+#take a lot time()
+wflw_svmpoly <- workflow() %>%
+    add_model(
+        svm_poly_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+```
+
+```{r}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+```
+Create a Modeltime Table
+```{r}
+model_tbl <- modeltime_table(
+    wflw_rf,
+    wflw_tunedrf,
+    #wflw_neural,
+    wflw_svmrbf,
+    #wflw_svmpoly,
+    wflw_knnspec,
+    wflw_xgboost
+)
+model_tbl
+```
+
+#Calibrate by client
+```{r}
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+
+calib_tbl
+```
+
+Measure Accuracy on validation data
+```{r}
+#global error
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+```{r}
+#local error for each client
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+validate the  Test Data
+conf_by_id : produce confidence interval estimates by an ID feature.
+#all results
+```{r}
+result <- calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+result
+```
+```{r}
+result %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+
+```{r}
+residuals_tbl <- calib_tbl  %>%
+    modeltime_calibrate(new_data = testing(splits)) %>%
+    modeltime_residuals()
+```
+```{r}
+residuals_tbl %>%
+    group_by(.model_id) %>%
+    #filter(.model_id == 5)%>%
+    plot_modeltime_residuals(
+        .type = "timeplot",
+        .interactive = FALSE,
+    )
+```
+
+```{r}
+choose_one_client<-testing(splits)%>% filter(client == "5")
+residuals_forclient <- calib_tbl  %>%
+    modeltime_calibrate(new_data = choose_one_client)%>%
+    modeltime_residuals()
+```
+```{r}
+residuals_forclient %>%
+    group_by(.model_id) %>%
+    #filter(.model_id == 5)%>%
+    plot_modeltime_residuals(
+        .type = "timeplot",
+        .interactive = FALSE
+    )
+residuals_forclient%>%
+  filter(.model_id == 5)%>%
+  ggplot( aes(x= .index)) +                    # basic graphical object
+  geom_line(aes(y=.residuals),color="red") +# first layer
+  geom_line(aes(y=.actual),color ="green") +
+  geom_line(aes(y=.prediction),color ="yellow")+
+  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
+
+residuals_forclient%>%
+  filter(.model_id == 3)%>%
+  ggplot( aes(x= .index)) +                    # basic graphical object
+  geom_line(aes(y=.residuals),color="red") +# first layer
+  geom_line(aes(y=.actual),color ="green") +
+  geom_line(aes(y=.prediction),color ="yellow")+
+  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
+```
+```{r}
+predresult <- result %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+  mutate(obs =  ifelse(actual > 2.5, TRUE, FALSE))%>%
+  mutate(rf_pred=  ifelse(rf > 2.5,TRUE, FALSE))%>%
+  mutate(rftuned_pred=  ifelse(rf_tuned > 2.5,TRUE, FALSE))%>%
+  mutate(svm_pred=  ifelse(svm_rbd > 2.5,TRUE, FALSE))%>%
+  mutate(knn_pred=  ifelse(knn > 2.5,TRUE, FALSE))%>%
+  mutate(xgboost_pred=  ifelse(xgboost > 2.5,TRUE, FALSE))%>%
+  mutate(obs = as.factor(obs), rf_pred = as.factor(rf_pred), rftuned_pred = as.factor(rftuned_pred), 
+         svm_pred = as.factor(svm_pred),knn_pred=as.factor(knn_pred), xgboost_pred = as.factor(xgboost_pred))
+```
+
+```{r}
+conf<-predresult%>%
+  group_by(date) %>%
+  summarize(sens_rf = sens_vec(obs, rf_pred), sens_rftuned = sens_vec(obs, rftuned_pred),
+            sens_svm = sens_vec(obs, svm_pred),sens_knn = sens_vec(obs, knn_pred),
+            sens_xgboost = sens_vec(obs, xgboost_pred),
+            spec_rf = spec_vec(obs, rf_pred), spec_rftuned = spec_vec(obs, rftuned_pred),
+            spec_svm = spec_vec(obs, svm_pred),spec_knn = spec_vec(obs, knn_pred),
+            spec_xgboost = spec_vec(obs, xgboost_pred),
+            acc_rf = accuracy_vec(obs, rf_pred), acc_rftuned = accuracy_vec(obs, rftuned_pred),
+            acc_svm = accuracy_vec(obs, svm_pred),acc_knn = accuracy_vec(obs, knn_pred),
+            acc_xgboost = accuracy_vec(obs, xgboost_pred))
+
+```
+```{r}
+conf%>%
+  pivot_longer(sens_rf:sens_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+  
+conf%>%
+  pivot_longer(spec_rf:spec_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf%>%
+  pivot_longer(acc_rf:acc_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+```
