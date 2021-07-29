@@ -41,6 +41,10 @@ yearly_data <-
          -hes, -hes_uns, -str_hes, -ae, -dep_var, -shrinkage, -STATE_NAME, -ihme_deaths)
 ```
 
+Make figure background transparent
+```{r}
+theme_update(plot.background = element_rect(fill = "transparent", colour = NA))
+```
 
 
 
@@ -97,7 +101,7 @@ test <-
 ```
 
 
-```{r}
+```{r cache = TRUE}
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
@@ -272,6 +276,7 @@ Testing on known clients and unknown clients.
 
 We first split our clients into testing and training.
 ```{r}
+set.seed(1213)
 training_clients <-
   weekly_data %>%
   nest_by(client) %>%
@@ -323,7 +328,8 @@ ass_idx <-
   rownames_to_column() %>%
   filter(client %in% training_clients) %>%
   filter(!client %in% ana_clients & date == assess) %>%
-  pull(rowname) %>% as.integer()
+  pull(rowname) %>%
+  as.integer()
 
 spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly_data)
 resmpl <- manual_rset(list(spl), c("foo"))
@@ -348,13 +354,22 @@ xgboost_workflow <-
 ```
 
 Now we tune! We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
-```{r cache = true, collapse = TRUE}
+```{r cache = TRUE, collapse = TRUE}
 set.seed(98324)
+res_grd <-
+  xgboost_workflow %>%
+  tune_grid(
+    resamples = resmpl,
+    grid = 10,
+    metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy),
+    control = control_grid(verbose = TRUE))
+
 res <-
   xgboost_workflow %>%
   tune_sim_anneal(
       resamples = resmpl,
       iter = 20,
+      initial = res_grd,
       metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
 ```
 
@@ -370,6 +385,10 @@ best_parms <- tribble(
 best_parms <- tribble(
           ~trees, ~tree_depth, ~learn_rate,
           138, 6, 0.07662993111378884)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          1939,2,0.005523512626608967)
 ```
 
 We apply these parameters to our workflow
@@ -443,8 +462,8 @@ Look at results one by one
 tests <-
   tribble(
     ~id, ~set,
-    # "known true", test_known_true,
-    # "unknown true", test_unknown_true,
+    "known true", test_known_true,
+    "unknown true", test_unknown_true,
     "known fore", test_known_fore,
     "unkown fore", test_unknown_fore)
 
@@ -1219,9 +1238,3 @@ predclaim2%>%
   pivot_longer(claims:xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.5)
 ```
-
-```
-
-
-
-
