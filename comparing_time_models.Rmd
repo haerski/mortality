@@ -333,9 +333,9 @@ Common recipe for all models.
 ```{r}
 common_recipe <-
   recipe(class ~ ., data = processed_data) %>%
-  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths, date) %>%
   step_zv(all_predictors()) %>%
-  step_log() %>%
+  # step_log(volume, POP) %>%
   step_normalize(all_predictors())
   
 ```
@@ -434,45 +434,42 @@ sln_wf <-
 
 
 ```{r}
-wflows <- tribble(~wflow ,sln_wf, knn_wf, log_wf, forest_wf, bt_wf, svm_lin_wf) 
+wflows <- tribble(~wflow ,
+                 # sln_wf,
+                  knn_wf, log_wf, forest_wf, bt_wf,# svm_lin_wf
+)
  
 
 
+wflows <-
+  wflows %>%
+  mutate(wflows_fit = map(wflow, ~ fit(.x, train)))
+
+wflows <-
+  wflows %>%
+  mutate(
+    class_predict = map(wflows_fit, ~ predict(.x, test)),
+    prob_predict = map(wflows_fit, ~ predict(.x, test, type = "prob")))
+
 wflows %>%
-  mutate(wflows_fit=map(wflow,~fit(.x,train)))
-
-
-```
-
-
-```{r}
-trained_bt_wf <-
-  bt_wf %>%
-  fit(train)
-```
-
-```{r}
-trained_log_wf <-
-  log_wf %>%
-  fit(train)
-
-trained_forest_wf <-
- forest_wf %>%
-  fit(train)
-
-trained_svm_lin_wf <-
-  svm_lin_wf %>%
-  fit(train)
-
-trained_knn_wf <-
-  knn_wf %>%
-  fit(train)
-
-trained_sln_wf <-
-  sln_wf %>%
-  fit(train)
+  bind_cols(tribble(~id, "knn", "log", "forest", "bt")) %>%
+  select(-wflow, -wflows_fit) %>%
+  mutate(prob_predict = map(prob_predict, ~ bind_cols(.x, test %>% select(date, class)))) %>%
+  unnest(c(class_predict, prob_predict)) %>%
+  group_by(id, date) %>%
+  summarize(
+            sens = sens_vec(class, .pred_class),
+            spec = spec_vec(class, .pred_class),
+            roc_auc = roc_auc_vec(class, .pred_Adverse), .groups = "keep") %>%
+  pivot_longer(sens:roc_auc, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = id)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)
 
 ```
+
 
 First, we forecast the deaths. 
 ```{r}
