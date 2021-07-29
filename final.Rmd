@@ -8,7 +8,7 @@ knitr::opts_chunk$set(
 
 ## Data loading and boring stuff
 No need to talk about this.
-Please download the latest version of `data/simulation_data/all_persons.feather` from Google Drive.
+Please download the latest version of `data/processed_data_20_12_23.feather` from Google Drive.
 ```{r message = FALSE}
 library(tidyverse)
 library(tidymodels)
@@ -20,64 +20,43 @@ library(skimr)
 library(vip)
 library(ggbeeswarm)
 library(finetune)
-per <- read_feather("data/simulation_data/all_persons.feather")
-
-clients <-
-  per %>%
-  group_by(client) %>%
-  summarize(
-    zip3 = first(zip3),
-    size = n(),
-    volume = sum(FaceAmt),
-    avg_qx = mean(qx),
-    avg_age = mean(Age),
-    per_male = sum(Sex == "Male") / size,
-    per_blue_collar = sum(collar == "blue") / size,
-    expected = sum(qx * FaceAmt),
-    actual_2021 = sum(FaceAmt[year == 2021], na.rm = TRUE),
-    ae_2021 = actual_2021 / (expected / 2),
-    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
-    ae_2020 = actual_2020 / expected,
-    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
-    ae_2019 = actual_2019 / expected,
-    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
-  ) %>%
-  relocate(adverse, ae_2020, .after = zip3) %>%
-  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
-
-
-zip_data <-
-  read_feather("data/data.feather") %>%
-  mutate(
-    density = POP / AREALAND,
-    AREALAND = NULL,
-    AREA = NULL,
-    HU = NULL,
-    vaccinated = NULL,
-    per_lib = NULL,
-    per_green = NULL,
-    per_other = NULL,
-    per_rep = NULL,
-    unempl_2020 = NULL,
-    deaths_covid = NULL,
-    deaths_all = NULL
-  ) %>%
-  rename(
-    unemp = unempl_2019,
-    hes_uns = hes_unsure,
-    str_hes = strong_hes,
-    income = Median_Household_Income_2019
-  )
-
-
-clients %<>%
-  inner_join(zip_data, by = "zip3") %>%
-  drop_na()
+library(lubridate)
+library(glue)
+library(slider)
+processed_data <-
+  read_feather("data/processed_data_20_12_23.feather")
 ```
+
+
+
+
 
 # Introduction
 AEs changing in 2019, 2020, copy paste from pres2
 
+We explain how we choose the threshold for adverse and not
+```{r}
+processed_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(
+      `12.5` = quantile(shrunk_ae, 0.125),
+      `25` = quantile(shrunk_ae, 0.25),
+      `50` = quantile(shrunk_ae, 0.50)
+  ) %>%
+  pivot_longer(-date, names_to = "pth", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = pth)) +
+  geom_line() +
+  geom_hline(yintercept = 2.5, linetype = "dashed")
+```
+
+How many clients are adverse each week?
+```{r}
+processed_data %>%
+  group_by(date) %>%
+  summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
+  ggplot(aes(x = date, y = prop_adverse)) + geom_line()
+```
 # "Baseline" stuff
 Can maybe also copy paste some things from pres 2.
 
