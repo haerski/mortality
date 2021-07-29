@@ -689,7 +689,7 @@ make_cv <-
   rownames_to_column() %>%
   group_by(client) %>%
   nest() %>%
-  vfold_cv() %>%
+  vfold_cv(v = 5) %>%
   mutate(
     an = map(splits, ~ analysis(.) %>% unnest(data) %>% ungroup()),
     as = map(splits, ~ assessment(.) %>% unnest(data) %>% ungroup())) %>%
@@ -711,7 +711,7 @@ xgboost_recipe <-
   step_zv(all_predictors())
 
 xgboost_spec <-
-  boost_tree(trees = 15, min_n = 1, tree_depth = tune(), learn_rate = tune(), loss_reduction = 0, sample_size = tune()) %>%
+  boost_tree(trees = tune(), tree_depth = tune(), learn_rate = tune()) %>%
   set_mode("classification") %>%
   set_engine("xgboost", nthread = 8)
 
@@ -721,7 +721,7 @@ xgboost_workflow <-
   add_model(xgboost_spec)
 ```
 
-We look at results
+We tune. This might take a while so I chose a nice tuning value at the end.
 ```{r cache = TRUE}
 res <-
   xgboost_workflow %>%
@@ -744,6 +744,7 @@ res <-
   tune_sim_anneal(
       resamples = resamp,
       param_info = parms,
+      iter = 20,
       initial = res,
       metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
 
@@ -752,18 +753,96 @@ res %>% show_best(metric = "roc_auc")
 .Last.value
 autoplot(res)
 
-parms <-
-  parms %>%
-  update(learn_rate = learn_rate(c(-7.5, -2.5)))
+bst <- res %>% select_best(metric = "roc_auc")
 
+bst <-
+ tribble(~trees, ~tree_depth, ~learn_rate,
+         138, 6, 0.07662993111378884)
+
+xgboost_workflow <- finalize_workflow(xgboost_workflow, bst)
+```
+
+Now we train on all clients prior to 2021-01-01 and test on 20201-04-04
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(date <= start) %>%
+  pull(rowname) %>% as.integer()
+
+test_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(date == end) %>%
+  pull(rowname) %>% as.integer()
+
+s1 <- make_splits(list(analysis = train_idx, assessment = test_idx), data = forecasted_data)
+rs <- manual_rset(list(s1), c("all_clients"))
+
+xgboost_workflow %>%
+  last_fit(s1, metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy)) %>%
+  collect_metrics()
+```
+
+Next we train on **some** clients, and test on seen and unseen clients!!!
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  unnest(data) %>%
+  filter(date <= start) %>%
+  pull(rowname) %>%
+  as.integer()
+
+train_clients <-
+  forecasted_data %>%
+  dplyr::slice(train_idx) %>%
+  pull(client) %>%
+  unique()
+
+unk_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(!client %in% train_clients) %>%
+  filter(date == end) %>%
+  pull(rowname) %>%
+  as.integer()
+
+knw_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(client %in% train_clients) %>%
+  filter(date == end) %>%
+  pull(rowname) %>%
+  as.integer()
+
+kno_for <- make_splits(list(analysis = train_idx, assessment = knw_idx), data = forecasted_data)
+unk_for <- make_splits(list(analysis = train_idx, assessment = unk_idx), data = forecasted_data)
+kno_tru <- make_splits(list(analysis = train_idx, assessment = knw_idx), data = processed_data)
+unk_tru <- make_splits(list(analysis = train_idx, assessment = unk_idx), data = processed_data)
+rset <- manual_rset(list(kno_for, unk_for, kno_tru, unk_tru), ids = c("Known Forecast", "Unknown Forecast", "Known True", "Unknown True"))
 
 res <-
   xgboost_workflow %>%
-  tune_sim_anneal(
-      resamples = resamp,
-      param_info = parms,
-      initial = res,
-      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+  fit_resamples(
+        resamples = rset,
+        metrics = metric_set(roc_auc, yardstick::accuracy, sens, spec, j_index))
+
+res %>%
+  collect_metrics(summarize = FALSE) %>%
+  mutate(known = str_detect(id, "Known"), fore = str_detect(id, "Forecast")) %>%
+  ggplot(aes(x = as.factor(id), y = .estimate, color = .metric)) +
+  geom_point() +
+  geom_line(aes(group = interaction(.metric, known)))
+  # geom_line(aes(group = interaction(.metric, fore)), color = "grey")
+
+forecasted_data %>%
+  filter(date == end) %>%
+  count(class)
+```
 
 
 res %>% show_best(metric = "roc_auc")
