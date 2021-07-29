@@ -82,3 +82,35 @@ Testing on known clients and unknown clients.
 
 ## Predicting AE as a time-series
 Don't take weekly deaths into account. How well/badly can we do?
+
+Train global model for all clients.
+
+Target: shrunk_ae (AE after shrunk).
+Predictors: data before covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees).
+Data pre-processing: log(POP), log(volume),log(expected) and normalize all predictors.
+Split: Train set(2020-03-15 - 2020-12-27), Test set (2021-01-03- 2021-06-27).
+Model: random forest, tuned random forest, Radial basis function support vector machines, K-nearest neighbors, Xgboost. 
+Outcome: predicting shrunk_ae, confident interval for each client every day.
+
+Performance: 
+calculate the predicted total claim every week and every client for half year.
+K-nearest neighbors catch the trend for every week total claim.
+
+Plot the predict result for each client, pick several to present, 
+The confident interval can cover the exact shrunk_ae
+
+Classify whether the client is adverse or not adverse: shrunk_ae > 2.5.
+plot sens, spec,j_index, accuracy
+Xgboost has biggest j_index. K-nearest neighbors has good sens, and worst spec while svm has bad sens and good spec.
+
+
+Currently, we use the predicting shrunk_ae as predicting result for each model. 
+Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
+2. combine different model's results to get final result. 3.Compared the result with weekly death into account, we can add predicted death data as one predictor.
+ 
+
+
+
+
+
+
