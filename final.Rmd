@@ -1,0 +1,36 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+      fig.width = 5, fig.height = 5, dpi = 300, fig.path = "figures/final-"
+)
+```
+
+# FINAL PRESENTATION
+
+# Introduction
+AEs changing in 2019, 2020, copy paste from pres2
+
+# "Baseline" stuff
+Can maybe also copy paste some things from pres 2.
+
+This is trained on known COVID-19 data.
+
+* Why? It can be used as is in a future pandemic.
+* Why not? Future pandemics may have different target mortality compared to COVID19.
+
+# Time stuff
+
+* Why? This model is more reactive than the previous one. It's trained on current pandemic data. It can be updated with time.
+* Why not? This will be very bad early on in the pandemic (lack of data) and bad when forecasting is hard.
+
+## Model selection
+Looking at performance every day for 3 months in the future
+
+## Training on part of the data (forecasted smoothed deaths + IHME)
+Testing on known clients and unknown clients.
+
+### Case study: June 2020
+
+### Case study: Jan 2021
+
+## Predicting AE as a time-series
+Don't take weekly deaths into account. How well/badly can we do?
