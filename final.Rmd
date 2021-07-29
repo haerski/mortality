@@ -270,9 +270,195 @@ wflows_cheat %>%
 ## Training on part of the data (forecasted smoothed deaths + IHME)
 Testing on known clients and unknown clients.
 
-### Case study: June 2020
+We first split our clients into testing and training.
+```{r}
+training_clients <-
+  weekly_data %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  pull(client)
+
+testing_clients <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  pull(client) %>%
+  unique()
+```
+
+The training clients are "known"; they will be what the model will be trained on.
+The testing clients are "unknown"; they will represent brand new clients.
 
 ### Case study: Jan 2021
+
+We will also define a training and testing date. For training, we use every date before Jan 1st 2021, and we test on Jan 2nd - Apr 1st.
+```{r}
+start <- ceiling_date(ymd("2021-01-01"), unit = "week")
+end <- ceiling_date(ymd("2021-04-01"), unit = "week")
+```
+
+Next we tune a boosted tree model to the training clients. For tuning purposes, we divide the training dates into analysis and assessment dates. The analysis dates will be all dated before Oct 1st, and assessment will be Jan 1st.
+
+```{r}
+analys <- ceiling_date(ymd("2020-10-01"), unit = "week")
+assess <- start
+```
+
+To assess the performance of our model, we split the training clients into analysis and assessment.
+We could (should?) also do cross-validation.
+```{r}
+set.seed(123)
+ana_clients <-
+  training_clients %>%
+  sample(length(.) * 3 / 4)
+
+ana_idx <-
+  weekly_data %>%
+  rownames_to_column() %>%
+  filter(client %in% ana_clients & date <= analys) %>%
+  pull(rowname) %>% as.integer()
+
+ass_idx <-
+  weekly_data %>%
+  rownames_to_column() %>%
+  filter(client %in% training_clients) %>%
+  filter(!client %in% ana_clients & date == assess) %>%
+  pull(rowname) %>% as.integer()
+
+spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly_data)
+resmpl <- manual_rset(list(spl), c("foo"))
+```
+
+We describe our model. We use XGBoost
+```{r}
+xgboost_recipe <-
+  recipe(formula = class ~ ., data = weekly_data) %>%
+  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae) %>%
+  step_zv(all_predictors())
+
+xgboost_spec <-
+  boost_tree(trees = tune(), tree_depth = tune(), learn_rate = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("xgboost", nthread = 8)
+
+xgboost_workflow <-
+  workflow() %>%
+  add_recipe(xgboost_recipe) %>%
+  add_model(xgboost_spec)
+```
+
+Now we tune! We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
+```{r cache = true, collapse = TRUE}
+set.seed(98324)
+res <-
+  xgboost_workflow %>%
+  tune_sim_anneal(
+      resamples = resmpl,
+      iter = 20,
+      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+```
+
+The best parameter values are
+```{r}
+res %>% show_best(metric = "roc_auc")
+best_parms <- res %>% select_best(metric = "roc_auc")
+
+best_parms <- tribble(
+        ~trees, ~tree_depth, ~learn_rate,
+        517, 10, 0.001312986874346298)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          138, 6, 0.07662993111378884)
+```
+
+We apply these parameters to our workflow
+```{r}
+final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
+```
+
+We now need to forecast 3 months worth of `smoothed_deaths`.
+```{r cache = TRUE}
+forecast <-
+  weekly_data %>%
+  filter(date >= "2020-03-15" & date <= start) %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+```{r}
+future <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  rename(smoothed_deaths = .mean)
+
+forecast_data <-
+  weekly_data %>%
+  rows_update(future, by = c("date","client"))
+```
+
+
+
+We define our training 
+```{r}
+train <-
+  weekly_data %>%
+  filter(client %in% training_clients & date <= start)
+```
+
+We will have several version of the testing set. Some of them will be known or unknown, some will be forecasted and true.
+```{r}
+test_known_true <-
+  weekly_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_true <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_known_fore <-
+  forecast_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_fore <-
+  forecast_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+```
+
+Train the workflow
+```{r}
+trained_wf <-
+  final_wf %>%
+  fit(train)
+```
+
+Look at results one by one
+```{r}
+tests <-
+  tribble(
+    ~id, ~set,
+    # "known true", test_known_true,
+    # "unknown true", test_unknown_true,
+    "known fore", test_known_fore,
+    "unkown fore", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(Accuracy = yardstick::accuracy_vec(class, .pred_class)) %>%
+  ggplot(aes(x = date, y = Accuracy, color = id)) + geom_line()
+```
+
+
+
+### Case study: June 2020
 
 ## Predicting AE as a time-series
 with IHME death vs with  zip death vs without death 
