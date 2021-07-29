@@ -1409,3 +1409,638 @@ forecasted_data %>%
   filter(date == end) %>%
   count(class)
 ```
+
+
+# Forecasting AE directly
+Get weeklydata from time.Rmd
+```{r}
+clients <-
+  read_feather("data/process.feather") %>%
+  filter(date >= "2020-03-15") %>%
+  mutate(client = as.factor(client)) %>%
+  #select(-year) %>%
+  mutate(POP=log(POP)) %>%
+  mutate(volume = log(volume)) %>%
+  mutate(expected = log(expected))
+```
+
+split
+```{r}
+#split
+  split
+  set.seed = 1234
+  splits <-  clients %>%
+    time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
+  train = training(splits)
+  test = testing(splits)
+  #index <- unique(train$client)
+  #val <- sliding_index(training(splits), index)
+  
+  #crossval <- vfold_cv(training(splits), strata = zip3)
+```
+#window forest
+It is not good 
+```{r}
+model_spec <- window_reg(
+        window_size     = "6 months",
+        id = "client"
+    ) %>%
+    # Extra parameters passed as: set_engine(...)
+    set_engine(
+        engine          = "window_function",
+        #window_function = median,
+        na.rm           = TRUE,
+        window_function = ~ tail(.x, 100),
+    )
+
+# Fit Spec
+model_fit <- model_spec %>%
+    fit(shrunk_ae~ date + client, data = train)
+model_fit
+predict(model_fit, test)
+
+
+model_tbl <- modeltime_table(
+    model_fit)
+
+model_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+
+```
+
+```{r}
+result0 <- calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+result0
+```
+
+#Compare only one predictor(date) with all predictors(as before), the latter has better results.
+#XGboost have the best result among all 7 model.
+
+We now gather our recipes and models.
+
+#recipe
+```{r}
+rec_obj <-
+    recipe(shrunk_ae ~ ., data = training(splits)) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    step_rm( claims, smoothed_ae, class, shrinkage, dep_var, ae, zip_deaths)%>%
+    #step_rm(adverse)%>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
+    step_normalize(all_predictors(), -all_nominal())
+
+summary(prep(rec_obj))
+bake(prep(rec_obj),training(splits))
+```
+
+#engine
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+sln_spec <-
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
+  set_engine("nnet") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  #set_mode("classification")
+  set_mode("regression")
+xgboost_spec <-
+  boost_tree(trees = 100) %>%
+  set_engine("xgboost") %>%
+  #set_mode("classification")
+  set_mode("regression")
+```
+
+# workflow without death data
+```{r eval= FALSE}
+#cannot fit
+wflw_neural <- workflow() %>%
+    add_model(
+        sln_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+```
+```{r eval= FALSE}
+#take a lot time()
+wflw_svmpoly <- workflow() %>%
+    add_model(
+        svm_poly_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+```
+
+```{r}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+```
+Create a Modeltime Table
+```{r}
+model_tbl <- modeltime_table(
+    wflw_rf,
+    wflw_tunedrf,
+    #wflw_neural,
+    wflw_svmrbf,
+    #wflw_svmpoly,
+    wflw_knnspec,
+    wflw_xgboost
+)
+model_tbl
+```
+
+#Calibrate by client
+```{r}
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+
+calib_tbl
+```
+
+Measure Accuracy on validation data
+```{r}
+#global error
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+```{r}
+#local error for each client
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+validate the  Test Data
+conf_by_id : produce confidence interval estimates by an ID feature.
+#all results
+```{r}
+result <- calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+result
+```
+```{r}
+result %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+
+#recipe with zip death
+```{r}
+rec_obj1 <-
+    recipe(shrunk_ae ~ ., data = training(splits)) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    step_rm( claims, smoothed_ae, class, shrinkage, dep_var, ae)%>%
+    #step_rm(adverse)%>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
+    step_normalize(all_predictors(), -all_nominal())
+
+summary(prep(rec_obj1))
+bake(prep(rec_obj1),training(splits))
+```
+
+
+# workflow with zip death
+
+```{r}
+wflw_rf1 <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf1 <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf1 <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_knnspec1 <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost1 <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))  
+```
+Create a Modeltime Table
+```{r}
+model_tbl1 <- modeltime_table(
+    wflw_rf1,
+    wflw_tunedrf1,
+    #wflw_neural,
+    wflw_svmrbf1,
+    #wflw_svmpoly,
+    wflw_knnspec1,
+    wflw_xgboost1
+)
+model_tbl1
+```
+
+#Calibrate by client
+```{r}
+calib_tbl1 <- model_tbl1 %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+
+calib_tbl1
+```
+
+Measure Accuracy on validation data
+```{r}
+#global error
+calib_tbl1 %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+```{r}
+#local error for each client
+calib_tbl1 %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+validate the  Test Data
+conf_by_id : produce confidence interval estimates by an ID feature.
+#all results
+```{r}
+result1 <- calib_tbl1 %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+result1
+```
+```{r}
+result1 %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+
+
+#plot sens, spec, accuracy, j_index
+```{r}
+actual <- clients %>%
+  select(date, client, shrunk_ae)
+```
+
+```{r}
+predresult0 <- result0 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", windows = "1" )%>%
+  drop_na()%>%
+  mutate(obs =  ifelse(actual > 2.5, TRUE, FALSE))%>%
+  mutate(windows_pred=  ifelse(windows > 2.5,TRUE, FALSE))%>%
+  mutate(obs = as.factor(obs), windows_pred = as.factor(windows_pred))
+
+conf0<-predresult0%>%
+  group_by(date) %>%
+  summarize(sens_windows = sens_vec(obs, windows_pred),
+            spec_windows = spec_vec(obs, windows_pred), 
+            jinex_window = j_index_vec(obs,windows_pred),
+            acc_windows = accuracy_vec(obs, windows_pred))
+
+conf0%>%
+  pivot_longer(sens_windows, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+  
+conf0%>%
+  pivot_longer(spec_windows, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf0%>%
+  pivot_longer(jinex_window, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf0%>%
+  pivot_longer(acc_windows, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+```
+
+
+#plot sens, spec, accuracy, j_index
+
+
+
+```{r}
+threshold = 2.5
+```
+
+```{r}
+predresult <- result %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+  mutate(obs =  ifelse(actual > threshold  , TRUE, FALSE))%>%
+  mutate(rf_pred=  ifelse(rf > threshold ,TRUE, FALSE))%>%
+  mutate(rftuned_pred=  ifelse(rf_tuned > threshold ,TRUE, FALSE))%>%
+  mutate(svm_pred=  ifelse(svm_rbd > threshold ,TRUE, FALSE))%>%
+  mutate(knn_pred=  ifelse(knn > threshold ,TRUE, FALSE))%>%
+  mutate(xgboost_pred=  ifelse(xgboost > threshold ,TRUE, FALSE))%>%
+  mutate(obs = as.factor(obs), rf_pred = as.factor(rf_pred), rftuned_pred = as.factor(rftuned_pred), 
+         svm_pred = as.factor(svm_pred),knn_pred=as.factor(knn_pred), xgboost_pred = as.factor(xgboost_pred))
+
+conf<-predresult%>%
+  group_by(date) %>%
+  summarize(sens_rf = sens_vec(obs, rf_pred), 
+            sens_rftuned = sens_vec(obs, rftuned_pred),
+            sens_svm = sens_vec(obs, svm_pred),
+            sens_knn = sens_vec(obs, knn_pred),
+            sens_xgboost = sens_vec(obs, xgboost_pred),
+            spec_rf = spec_vec(obs, rf_pred), 
+            spec_rftuned = spec_vec(obs, rftuned_pred),
+            spec_svm = spec_vec(obs, svm_pred),
+            spec_knn = spec_vec(obs, knn_pred),
+            spec_xgboost = spec_vec(obs, xgboost_pred),
+            jindex_rf = j_index_vec(obs, rf_pred),
+            jindex_rftuned = j_index_vec(obs, rftuned_pred),
+            jindex_svm = j_index_vec(obs, svm_pred),
+            jindex_knn = j_index_vec(obs, knn_pred),
+            jindex_xgboost = j_index_vec(obs, xgboost_pred),
+            acc_rf = accuracy_vec(obs, rf_pred), 
+            acc_rftuned = accuracy_vec(obs, rftuned_pred),
+            acc_svm = accuracy_vec(obs, svm_pred),
+            acc_knn = accuracy_vec(obs, knn_pred),
+            acc_xgboost = accuracy_vec(obs, xgboost_pred))
+
+conf%>%
+  pivot_longer(sens_rf:sens_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+  
+conf%>%
+  pivot_longer(spec_rf:spec_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf%>%
+  pivot_longer(jindex_rf:jindex_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf%>%
+  pivot_longer(acc_rf:acc_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+```
+
+```{r}
+predresult1 <- result1 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+  mutate(obs =  ifelse(actual > threshold , TRUE, FALSE))%>%
+  mutate(rf_pred=  ifelse(rf > threshold ,TRUE, FALSE))%>%
+  mutate(rftuned_pred=  ifelse(rf_tuned > threshold ,TRUE, FALSE))%>%
+  mutate(svm_pred=  ifelse(svm_rbd > threshold ,TRUE, FALSE))%>%
+  mutate(knn_pred=  ifelse(knn > threshold ,TRUE, FALSE))%>%
+  mutate(xgboost_pred=  ifelse(xgboost > threshold ,TRUE, FALSE))%>%
+  mutate(obs = as.factor(obs), rf_pred = as.factor(rf_pred), rftuned_pred = as.factor(rftuned_pred), 
+         svm_pred = as.factor(svm_pred),knn_pred=as.factor(knn_pred), xgboost_pred = as.factor(xgboost_pred))
+
+conf1<-predresult1%>%
+  group_by(date) %>%
+  summarize(sens_rf = sens_vec(obs, rf_pred), sens_rftuned = sens_vec(obs, rftuned_pred),
+            sens_svm = sens_vec(obs, svm_pred),sens_knn = sens_vec(obs, knn_pred),
+            sens_xgboost = sens_vec(obs, xgboost_pred),
+            spec_rf = spec_vec(obs, rf_pred), spec_rftuned = spec_vec(obs, rftuned_pred),
+            spec_svm = spec_vec(obs, svm_pred),spec_knn = spec_vec(obs, knn_pred),
+            spec_xgboost = spec_vec(obs, xgboost_pred),
+            jindex_rf = j_index_vec(obs, rf_pred), jindex_rftuned = j_index_vec(obs, rftuned_pred),
+            jindex_svm = j_index_vec(obs, svm_pred),jindex_knn = j_index_vec(obs, knn_pred),
+            jindex_xgboost = j_index_vec(obs, xgboost_pred),
+            acc_rf = accuracy_vec(obs, rf_pred), acc_rftuned = accuracy_vec(obs, rftuned_pred),
+            acc_svm = accuracy_vec(obs, svm_pred),acc_knn = accuracy_vec(obs, knn_pred),
+            acc_xgboost = accuracy_vec(obs, xgboost_pred))
+
+conf1%>%
+  pivot_longer(sens_rf:sens_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+  
+conf1%>%
+  pivot_longer(spec_rf:spec_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf1%>%
+  pivot_longer(jindex_rf:jindex_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf1%>%
+  pivot_longer(acc_rf:acc_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+```
+
+
+What to calculate claim
+```{r}
+claim <- read_feather("process.feather")%>%
+  select(date, client, claims, expected, shrinkage,volume)
+```
+```{r}
+predclaim <-
+predresult %>%
+  inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+```
+```{r}
+predclaim%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(expected:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+```{r}
+predclaim1 <-
+predresult1 %>%
+  inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+```
+```{r}
+predclaim1%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(expected:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+```{r}
+predclaim%>%
+  group_by(client)%>%
+  
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(claims:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = value, color = metric)) + geom_line()
+```
+
+
