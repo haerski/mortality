@@ -844,24 +844,85 @@ forecasted_data %>%
   count(class)
 ```
 
+### The above with MARS
+We choose the tuning data. This is a subset of clients
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  unnest(data) %>%
+  pull(rowname) %>%
+  as.integer()
 
-res %>% show_best(metric = "roc_auc")
-.Last.value
-autoplot(res)
+test_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  select(rowname) %>%
+  filter(!rowname %in% train_idx) %>%
+  pull(rowname) %>%
+  as.integer()
+```
 
+Next, we pick the last 3 months of 2020 as a testing set and everything before that as training.
+We use 10-fold CV on each client. We will use the 3 months before 2021-01-01 as training, and 2021-01-01 as testing.
+```{r}
+make_cv <-
+  training(init) %>%
+  rownames_to_column() %>%
+  group_by(client) %>%
+  nest() %>%
+  vfold_cv(v = 5) %>%
+  mutate(
+    an = map(splits, ~ analysis(.) %>% unnest(data) %>% ungroup()),
+    as = map(splits, ~ assessment(.) %>% unnest(data) %>% ungroup())) %>%
+  mutate(
+    an_idx = map(an, ~ filter(., date <= start - months(3)) %>% pull(rowname) %>% as.integer()),
+    as_idx = map(as, ~ filter(., date == start) %>% pull(rowname) %>% as.integer())) %>%
+  mutate(splits = map2(an_idx, as_idx, ~ make_splits(list(analysis = .x, assessment = .y), data = training(init)))) %>%
+  select(splits, id)
 
-parms <-
-  parms %>%
-  update(learn_rate = learn_rate(c(-7, -5)))
+resamp <- manual_rset(make_cv$splits, make_cv$id)
+```
 
+Define an MARS model
+```{r}
+earth_recipe <-
+  recipe(formula = class ~ ., data = processed_data) %>%
+  step_rm(zip3, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, dep_var, shrinkage) %>%
+  step_rm(STATE_NAME, date) %>%
+  step_zv(all_predictors())
+
+earth_spec <-
+  mars(num_terms = tune(), prod_degree = tune(), prune_method = "backward") %>%
+  set_mode("classification") %>%
+  set_engine("earth")
+
+earth_workflow <-
+  workflow() %>%
+  add_recipe(earth_recipe) %>%
+  add_model(earth_spec)
+
+earth_grid <-
+  earth_workflow %>%
+  parameters() %>%
+  update(
+    prune_method = prune_method(c("forward","backward","none")),
+    num_terms = num_terms(c(1, 30))) %>%
+  grid_regular(levels = 5)
+```
+
+We look at results
+```{r cache = TRUE}
 res <-
-  xgboost_workflow %>%
-  tune_sim_anneal(
+  earth_workflow %>%
+  tune_grid(
       resamples = resamp,
-      param_info = parms,
-      initial = res,
-      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
-
+      grid = earth_grid,
+      control = control_grid(save_pred = FALSE, verbose = TRUE, parallel_over = "everything"),
+      metrics = metric_set(yardstick::accuracy, roc_auc, sens, spec, j_index))
 
 res %>% show_best(metric = "roc_auc")
 .Last.value
@@ -869,7 +930,7 @@ autoplot(res)
 
 bst <- res %>% select_best(metric = "roc_auc")
 
-xgboost_workflow <- finalize_workflow(xgboost_workflow, bst)
+earth_workflow <- finalize_workflow(earth_workflow, bst)
 ```
 
 Now we train on all clients prior to 2021-01-01 and test on 20201-04-04
@@ -889,11 +950,65 @@ test_idx <-
 s1 <- make_splits(list(analysis = train_idx, assessment = test_idx), data = forecasted_data)
 rs <- manual_rset(list(s1), c("all_clients"))
 
-xgboost_workflow %>%
-  last_fit(s1, metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+earth_workflow %>%
+  last_fit(s1, metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy)) %>%
+  collect_metrics()
 ```
 
-Next we train on **some** clients, and test on the unseen clients!!!
+Next we train on **some** clients, and test on seen and unseen clients!!!
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  unnest(data) %>%
+  filter(date <= start) %>%
+  pull(rowname) %>%
+  as.integer()
+
+train_clients <-
+  forecasted_data %>%
+  dplyr::slice(train_idx) %>%
+  pull(client) %>%
+  unique()
+
+unk_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(!client %in% train_clients) %>%
+  filter(date == end) %>%
+  pull(rowname) %>%
+  as.integer()
+
+knw_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(client %in% train_clients) %>%
+  filter(date == end) %>%
+  pull(rowname) %>%
+  as.integer()
+
+s1 <- make_splits(list(analysis = train_idx, assessment = knw_idx), data = forecasted_data)
+s2 <- make_splits(list(analysis = train_idx, assessment = unk_idx), data = forecasted_data)
+rset <- manual_rset(list(s1, s2), ids = c("Known", "Unknown"))
+
+res <-
+  xgboost_workflow %>%
+  fit_resamples(
+        resamples = rset,
+        metrics = metric_set(roc_auc, yardstick::accuracy, sens, spec, j_index))
+
+res %>%
+  collect_metrics(summarize = FALSE) %>%
+  ggplot(aes(x = as.factor(id), y = .estimate, color = .metric, group = .metric)) + geom_point() + geom_line()
+
+forecasted_data %>%
+  filter(date == end) %>%
+  count(class)
+```
+
 
 
 
