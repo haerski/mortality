@@ -482,7 +482,9 @@ plot sens, spec,j_index, accuracy
 Xgboost has biggest j_index. K-nearest neighbors has good sens, and worst spec while svm has bad sens and good spec.
 
 Calculate the predicted total claim every week and every client for half year.
-K-nearest neighbors catch the trend for every week total claim.
+K-nearest neighbors, Xgboost, svm can catch the trend for every week total claim.
+
+For client, the result is not good since it is a global model for all clients
 
 Currently, we use the predicting shrunk_ae as predicting result for each model. 
 Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
@@ -1050,7 +1052,9 @@ plot sens, spec,j_index, accuracy
 Xgboost has biggest j_index. K-nearest neighbors has good sens, and worst spec while svm has bad sens and good spec.
 
 Calculate the predicted total claim every week and every client for half year.
-K-nearest neighbors catch the trend for every week total claim.
+K-nearest neighbors, Xgboost, svm can catch the trend for every week total claim.
+
+For client, the result is not good since it is a global model for all clients
 
 Currently, we use the predicting shrunk_ae as predicting result for each model. 
 Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
@@ -1292,6 +1296,34 @@ predclaim2%>%
 
 ```{r}
 predclaim%>%
+  #mutate(client = as.numeric(client))%>%
+  filter(client == c(1:50))%>%
+  group_by(client)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(claims:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.5)
+
+predclaim1%>%
+  #mutate(client = as.numeric(client))%>%
+  filter(client == c(1:50))%>%
+  group_by(client)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(claims:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.5)
+
+predclaim2%>%
   #mutate(client = as.numeric(client))%>%
   filter(client == c(1:50))%>%
   group_by(client)%>%
