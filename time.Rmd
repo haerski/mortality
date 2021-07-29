@@ -406,28 +406,40 @@ test %>%
 
 Now, let's check other models and see if we can find better performance. First, we start with SVM_poly.
 
+### Let's try to do some cross_validation before! 
+
+```{r}
+set.seed(100)
+
+cv_folds <-
+ vfold_cv(train, 
+          v = 10, 
+          strata = class) 
+
+```
+
 ```{r}
 
-svm_poly_spec <-
-  svm_poly(degree=5) %>%
-  set_engine("kernlab") %>%
-  set_mode("classification")
+log_spec <- 
+  logistic_reg(
+  mode = "classification",
+  engine = "glm")
 
 common_recipe <-
   recipe(class ~ ., data = processed_data) %>%
-  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_rm(client, zip3, date, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
   step_zv(all_predictors())
 ```
 
 
 ```{r}
-svm_poly_wf <-
+log_wf <-
   workflow() %>%
   add_recipe(common_recipe) %>%
-  add_model(svm_poly_spec)
+  add_model(log_spec)
 
-trained_svm_poly_wf <-
-  svm_poly_wf %>%
+trained_log_wf <-
+  log_wf %>%
   fit(train)
 ```
 
@@ -440,21 +452,85 @@ forecasted_test <-
   select(-zip_deaths) %>%
   rename(zip_deaths = .mean)
 
-trained_svm_poly_wf %>%
+trained_log_wf %>%
   predict(forecasted_test, type = "prob") %>%
   bind_cols(test) %>%
   group_by(date) %>%
   summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
   ggplot(aes(x = date, y = roc_auc)) + geom_line()
 ```
+How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
+Doesn't look too bad. Maybe a random forest is not the best model ?
+```{r}
+test %>%
+  bind_cols(predict(trained_log_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_log_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+Logistic regression is not good! Let's check SVM! 
+
+```{r}
+
+
+
+svm_lin_spec <-
+  svm_linear() %>%
+  set_engine("LiblineaR") %>%
+  set_mode("classification")
+
+common_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, date, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
+  step_zv(all_predictors())%>%
+  step_normalize(all_predictors())
+
+```
+
+
+```{r}
+svm_lin_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(svm_lin_spec)
+
+trained_svm_lin_wf <-
+  svm_lin_wf %>%
+  fit(train)
+```
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+#trained_svm_lin_wf %>%
+ # predict(forecasted_test, type = "prob") %>%
+  #bind_cols(test) %>%
+  #group_by(date) %>%
+  #summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  #ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
 
 How well can we possibly do? Let's use the true deaths, and compare with our forecasted ones.
 Doesn't look too bad. Maybe a random forest is not the best model ?
 ```{r}
 test %>%
-  bind_cols(predict(trained_svm_poly_wf, forecasted_test)) %>%
+  bind_cols(predict(trained_svm_lin_wf, forecasted_test)) %>%
   rename(pred_forecast = .pred_class) %>%
-  bind_cols(predict(trained_svm_poly_wf, test)) %>%
+  bind_cols(predict(trained_svm_lin_wf, test)) %>%
   rename(pred_true = .pred_class) %>%
   group_by(date) %>%
   summarize(sens_forecast = sens_vec(class, pred_forecast),
@@ -527,19 +603,21 @@ test %>%
 ```
 It looks like KNN is good. 
 
+
 Let's check Neural Network now! 
 
 ```{r}
 
 sln_spec <-
   mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
-  set_engine("nnet") %>%
+  set_engine("keras", verbose=0) %>%
   set_mode("classification")
 
 common_recipe <-
   recipe(class ~ ., data = processed_data) %>%
-  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths) %>%
-  step_zv(all_predictors())
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths, date) %>%
+  step_zv(all_predictors())%>%
+  step_normalize(all_predictors())
 ```
 
 
@@ -613,7 +691,7 @@ bt_wf <-
   add_recipe(common_recipe) %>%
   add_model(bt_spec)
 
-trained_bt_wf <-
+trained_bt_wf <-                                                                                                                                                                                                                                                                                                                                                                                                                                                              
   bt_wf %>%
   fit(train)
 ```
@@ -655,7 +733,6 @@ test %>%
 Boosted Trees is great! 
 
 
-
 ### Change the death_zip variable
 
 We will use a smoothed `zip_death` variable instead!
@@ -674,6 +751,10 @@ trained_wf <-
   forest_wf %>%
   fit(train)
 ```
+
+
+
+
 
 We substitute `smoothed_deaths` by the forecasted version of `smoothed_deaths` and predict.
 We plot the `roc_auc` of our predictions.
@@ -709,6 +790,68 @@ test %>%
   pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 ```
+
+Boosted Trees! 
+```{r}
+
+bt_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = 100)
+
+bt_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, date, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, zip_deaths) %>%
+  step_zv(all_predictors())
+```
+
+
+```{r}
+bt2_wf <-
+  workflow() %>%
+  add_recipe(bt_recipe) %>%
+  add_model(bt_spec)
+
+trained_bt2_wf <-
+  bt2_wf %>%
+  fit(train)
+```
+We substitute `smoothed_deaths` by the forecasted version of `smoothed_deaths` and predict.
+We plot the `roc_auc` of our predictions.
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-smoothed_deaths) %>%
+  rename(smoothed_deaths = .mean)
+
+trained_bt2_wf %>%
+  predict(forecasted_test, type = "prob") %>%
+  bind_cols(test) %>%
+  group_by(date) %>%
+  summarize(roc_auc = roc_auc_vec(class, .pred_Adverse)) %>%
+  ggplot(aes(x = date, y = roc_auc)) + geom_line()
+```
+
+Again, we compare with the true value of `smoothed_deaths`. It's much closer!!!!
+```{r}
+test %>%
+  bind_cols(predict(trained_bt2_wf, forecasted_test)) %>%
+  rename(pred_forecast = .pred_class) %>%
+  bind_cols(predict(trained_bt2_wf, test)) %>%
+  rename(pred_true = .pred_class) %>%
+  group_by(date) %>%
+  summarize(sens_forecast = sens_vec(class, pred_forecast),
+            spec_forecast = spec_vec(class, pred_forecast),
+            sens_true = sens_vec(class, pred_true),
+            spec_true = spec_vec(class, pred_true)) %>%
+  pivot_longer(sens_forecast:spec_true, names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+
 
 ### Using IHME forecasts
 
