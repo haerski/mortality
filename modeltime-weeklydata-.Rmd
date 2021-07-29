@@ -279,16 +279,16 @@ validate the  Test Data
 conf_by_id : produce confidence interval estimates by an ID feature.
 #all results
 ```{r}
-result <- calib_tbl %>%
+result3 <- calib_tbl %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
     ) 
-result
+result3
 ```
 ```{r}
-result %>%
+result3 %>%
     group_by(client) %>%
     filter(client == c( "1", "5", "7","10", "61","100"))%>%
     plot_modeltime_forecast(
@@ -347,7 +347,7 @@ residuals_forclient%>%
   scale_fill_discrete(labels = c("residual", "actual", "prediction"))
 ```
 ```{r}
-predresult <- result %>%
+predresult3 <- result3 %>%
   select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
   rename(model = .model_id, value = .value, date= .index)%>%
   relocate(model, value, .after = client)%>%
@@ -365,7 +365,7 @@ predresult <- result %>%
 ```
 
 ```{r}
-conf<-predresult%>%
+conf3<-predresult3%>%
   group_by(date) %>%
   summarize(sens_rf = sens_vec(obs, rf_pred), sens_rftuned = sens_vec(obs, rftuned_pred),
             sens_svm = sens_vec(obs, svm_pred),sens_knn = sens_vec(obs, knn_pred),
@@ -379,15 +379,15 @@ conf<-predresult%>%
 
 ```
 ```{r}
-conf%>%
+conf3%>%
   pivot_longer(sens_rf:sens_xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
   
-conf%>%
+conf3%>%
   pivot_longer(spec_rf:spec_xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 
-conf%>%
+conf3%>%
   pivot_longer(acc_rf:acc_xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 

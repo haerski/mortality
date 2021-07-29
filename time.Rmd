@@ -19,12 +19,13 @@ library(lubridate)
 
 Get weeklydata from time.Rmd
 ```{r}
-clients<-read_feather("process.feather") %>%
-  mutate(year = year(date))%>%
-  filter(year!=2019)%>%
+clients<-read_feather("process.feather")%>%
+  filter(date >= "2020-03-15")%>%
   mutate(client = as.factor(client))%>%
-  select(-year)%>%
-  mutate(POP=log(POP))
+  #select(-year)%>%
+  mutate(POP=log(POP))%>%
+  mutate(volume = log(volume))%>%
+  mutate(expected = log(expected))
 ```
 
 split
@@ -32,7 +33,7 @@ split
 #split
   split
   set.seed = 1234
-  splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", cumulative = TRUE)
+  splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
   train = training(splits)
   test = testing(splits)
   #index <- unique(train$client)
@@ -52,12 +53,12 @@ model_spec <- window_reg(
         engine          = "window_function",
         #window_function = median,
         na.rm           = TRUE,
-        window_function = ~ tail(.x, 40),
+        window_function = ~ tail(.x, 100),
     )
 
 # Fit Spec
 model_fit <- model_spec %>%
-    fit(shrunk_ae~ ., data = train)
+    fit(shrunk_ae~ date + client, data = train)
 model_fit
 predict(model_fit, test)
 
@@ -109,32 +110,31 @@ result0
 #XGboost have the best result among all 7 model.
 
 We now gather our recipes and models.
+
 #recipe
 ```{r}
 rec_obj <-
     recipe(shrunk_ae ~ ., data = training(splits)) %>%
-    step_mutate(client = droplevels(client)) %>%
-    step_timeseries_signature(date) %>%
-    step_rm(date) %>%
     #step_rm(year,month,day)%>%
     step_rm(zip3)%>%
     step_rm( claims, smoothed_ae, class, shrinkage, dep_var, ae, zip_deaths)%>%
     #step_rm(adverse)%>%
-    step_zv(all_predictors()) %>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
     step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
     step_normalize(all_predictors(), -all_nominal())
 
 summary(prep(rec_obj))
 bake(prep(rec_obj),training(splits))
-```
-```{r}
-recipes <- list(rec_obj)
 ```
 
 #engine
 ```{r}
 forest_spec <-
   rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
   #set_mode("classification") %>%
   set_mode("regression")%>%
   set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
@@ -145,7 +145,7 @@ tuned_forest_spec <-
   set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
 # Samara's models
 sln_spec <-
-  mlp() %>%
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
   set_engine("nnet") %>%
   #set_mode("classification")
   set_mode("regression")
@@ -165,13 +165,13 @@ knn_spec <-
   #set_mode("classification")
   set_mode("regression")
 xgboost_spec <-
-  boost_tree() %>%
+  boost_tree(trees = 100) %>%
   set_engine("xgboost") %>%
   #set_mode("classification")
   set_mode("regression")
 ```
 
-# workflow 
+# workflow without death data
 ```{r eval= FALSE}
 #cannot fit
 wflw_neural <- workflow() %>%
@@ -291,69 +291,19 @@ result %>%
     )
 ```
 
-```{r}
-residuals_tbl <- calib_tbl  %>%
-    modeltime_calibrate(new_data = testing(splits)) %>%
-    modeltime_residuals()
-```
-```{r}
-residuals_tbl %>%
-    group_by(.model_id) %>%
-    #filter(.model_id == 5)%>%
-    plot_modeltime_residuals(
-        .type = "timeplot",
-        .interactive = FALSE,
-    )
-```
-
-```{r}
-choose_one_client<-testing(splits)%>% filter(client == "5")
-residuals_forclient <- calib_tbl  %>%
-    modeltime_calibrate(new_data = choose_one_client)%>%
-    modeltime_residuals()
-```
-```{r}
-residuals_forclient %>%
-    group_by(.model_id) %>%
-    #filter(.model_id == 5)%>%
-    plot_modeltime_residuals(
-        .type = "timeplot",
-        .interactive = FALSE
-    )
-residuals_forclient%>%
-  filter(.model_id == 5)%>%
-  ggplot( aes(x= .index)) +                    # basic graphical object
-  geom_line(aes(y=.residuals),color="red") +# first layer
-  geom_line(aes(y=.actual),color ="green") +
-  geom_line(aes(y=.prediction),color ="yellow")+
-  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
-
-residuals_forclient%>%
-  filter(.model_id == 3)%>%
-  ggplot( aes(x= .index)) +                    # basic graphical object
-  geom_line(aes(y=.residuals),color="red") +# first layer
-  geom_line(aes(y=.actual),color ="green") +
-  geom_line(aes(y=.prediction),color ="yellow")+
-  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
-```
-
-
-
-
-We now gather our recipes and models.
-#recipe
+#recipe with zip death
 ```{r}
 rec_obj1 <-
     recipe(shrunk_ae ~ ., data = training(splits)) %>%
-    step_mutate(client = droplevels(client)) %>%
-    step_timeseries_signature(date) %>%
-    step_rm(date) %>%
     #step_rm(year,month,day)%>%
     step_rm(zip3)%>%
     step_rm( claims, smoothed_ae, class, shrinkage, dep_var, ae)%>%
     #step_rm(adverse)%>%
-    step_zv(all_predictors()) %>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
     step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
     step_normalize(all_predictors(), -all_nominal())
 
 summary(prep(rec_obj1))
@@ -361,65 +311,7 @@ bake(prep(rec_obj1),training(splits))
 ```
 
 
-#engine
-```{r}
-forest_spec <-
-  rand_forest(trees = 1000) %>%
-  #set_mode("classification") %>%
-  set_mode("regression")%>%
-  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
-tuned_forest_spec <-
-  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
-  #set_mode("classification") %>%
-  set_mode("regression")%>%
-  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
-# Samara's models
-sln_spec <-
-  mlp() %>%
-  set_engine("nnet") %>%
-  #set_mode("classification")
-  set_mode("regression")
-svm_rbf_spec <-
-  svm_rbf() %>%
-  set_engine("kernlab") %>%
-  #set_mode("classification")
-  set_mode("regression")
-svm_poly_spec <-
-  svm_poly() %>%
-  set_engine("kernlab") %>%
-  #set_mode("classification")
-  set_mode("regression")
-knn_spec <-
-  nearest_neighbor() %>%
-  set_engine("kknn") %>%
-  #set_mode("classification")
-  set_mode("regression")
-xgboost_spec <-
-  boost_tree() %>%
-  set_engine("xgboost") %>%
-  #set_mode("classification")
-  set_mode("regression")
-```
-
-# workflow 
-```{r eval= FALSE}
-#cannot fit
-wflw_neural <- workflow() %>%
-    add_model(
-        sln_spec
-    ) %>%
-    add_recipe(rec_obj) %>%
-    fit(data = training(splits))
-```
-```{r eval= FALSE}
-#take a lot time()
-wflw_svmpoly <- workflow() %>%
-    add_model(
-        svm_poly_spec
-    ) %>%
-    add_recipe(rec_obj) %>%
-    fit(data = training(splits))
-```
+# workflow with zip death
 
 ```{r}
 wflw_rf1 <- workflow() %>%
@@ -521,56 +413,11 @@ result1 %>%
     )
 ```
 
-```{r}
-residuals_tbl1 <- calib_tbl1  %>%
-    modeltime_calibrate(new_data = testing(splits)) %>%
-    modeltime_residuals()
-```
-```{r}
-residuals_tbl1 %>%
-    group_by(.model_id) %>%
-    #filter(.model_id == 5)%>%
-    plot_modeltime_residuals(
-        .type = "timeplot",
-        .interactive = FALSE,
-    )
-```
 
-```{r}
-choose_one_client<-testing(splits)%>% filter(client == "5")
-residuals_forclient1 <- calib_tbl1  %>%
-    modeltime_calibrate(new_data = choose_one_client)%>%
-    modeltime_residuals()
-```
-```{r}
-residuals_forclient1 %>%
-    group_by(.model_id) %>%
-    #filter(.model_id == 5)%>%
-    plot_modeltime_residuals(
-        .type = "timeplot",
-        .interactive = FALSE
-    )
-residuals_forclient1 %>%
-  filter(.model_id == 5)%>%
-  ggplot( aes(x= .index)) +                    # basic graphical object
-  geom_line(aes(y=.residuals),color="red") +# first layer
-  geom_line(aes(y=.actual),color ="green") +
-  geom_line(aes(y=.prediction),color ="yellow")+
-  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
-
-residuals_forclient1 %>%
-  filter(.model_id == 3)%>%
-  ggplot( aes(x= .index)) +                    # basic graphical object
-  geom_line(aes(y=.residuals),color="red") +# first layer
-  geom_line(aes(y=.actual),color ="green") +
-  geom_line(aes(y=.prediction),color ="yellow")+
-  scale_fill_discrete(labels = c("residual", "actual", "prediction"))
-```
-
-#plot sens, spec, accuracy 
+#plot sens, spec, accuracy, j_index
 ```{r}
 actual <- clients %>%
-  select(date, client, smoothed_ae)
+  select(date, client, shrunk_ae)
 ```
 
 ```{r}
@@ -584,18 +431,14 @@ predresult0 <- result0 %>%
   mutate(obs =  ifelse(actual > 2.5, TRUE, FALSE))%>%
   mutate(windows_pred=  ifelse(windows > 2.5,TRUE, FALSE))%>%
   mutate(obs = as.factor(obs), windows_pred = as.factor(windows_pred))
-```
- 
 
-```{r}
 conf0<-predresult0%>%
   group_by(date) %>%
   summarize(sens_windows = sens_vec(obs, windows_pred),
             spec_windows = spec_vec(obs, windows_pred), 
+            jinex_window = j_index_vec(obs,windows_pred),
             acc_windows = accuracy_vec(obs, windows_pred))
 
-```
-```{r}
 conf0%>%
   pivot_longer(sens_windows, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
@@ -605,12 +448,22 @@ conf0%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 
 conf0%>%
+  pivot_longer(jinex_window, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf0%>%
   pivot_longer(acc_windows, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 
 ```
+
+
+#plot sens, spec, accuracy, j_index
+
+
+
 ```{r}
-threshold = 3
+threshold = 2.5
 ```
 
 ```{r}
@@ -629,30 +482,40 @@ predresult <- result %>%
   mutate(xgboost_pred=  ifelse(xgboost > threshold ,TRUE, FALSE))%>%
   mutate(obs = as.factor(obs), rf_pred = as.factor(rf_pred), rftuned_pred = as.factor(rftuned_pred), 
          svm_pred = as.factor(svm_pred),knn_pred=as.factor(knn_pred), xgboost_pred = as.factor(xgboost_pred))
-```
- 
 
-```{r}
 conf<-predresult%>%
   group_by(date) %>%
-  summarize(sens_rf = sens_vec(obs, rf_pred), sens_rftuned = sens_vec(obs, rftuned_pred),
-            sens_svm = sens_vec(obs, svm_pred),sens_knn = sens_vec(obs, knn_pred),
+  summarize(sens_rf = sens_vec(obs, rf_pred), 
+            sens_rftuned = sens_vec(obs, rftuned_pred),
+            sens_svm = sens_vec(obs, svm_pred),
+            sens_knn = sens_vec(obs, knn_pred),
             sens_xgboost = sens_vec(obs, xgboost_pred),
-            spec_rf = spec_vec(obs, rf_pred), spec_rftuned = spec_vec(obs, rftuned_pred),
-            spec_svm = spec_vec(obs, svm_pred),spec_knn = spec_vec(obs, knn_pred),
+            spec_rf = spec_vec(obs, rf_pred), 
+            spec_rftuned = spec_vec(obs, rftuned_pred),
+            spec_svm = spec_vec(obs, svm_pred),
+            spec_knn = spec_vec(obs, knn_pred),
             spec_xgboost = spec_vec(obs, xgboost_pred),
-            acc_rf = accuracy_vec(obs, rf_pred), acc_rftuned = accuracy_vec(obs, rftuned_pred),
-            acc_svm = accuracy_vec(obs, svm_pred),acc_knn = accuracy_vec(obs, knn_pred),
+            jindex_rf = j_index_vec(obs, rf_pred),
+            jindex_rftuned = j_index_vec(obs, rftuned_pred),
+            jindex_svm = j_index_vec(obs, svm_pred),
+            jindex_knn = j_index_vec(obs, knn_pred),
+            jindex_xgboost = j_index_vec(obs, xgboost_pred),
+            acc_rf = accuracy_vec(obs, rf_pred), 
+            acc_rftuned = accuracy_vec(obs, rftuned_pred),
+            acc_svm = accuracy_vec(obs, svm_pred),
+            acc_knn = accuracy_vec(obs, knn_pred),
             acc_xgboost = accuracy_vec(obs, xgboost_pred))
 
-```
-```{r}
 conf%>%
   pivot_longer(sens_rf:sens_xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
   
 conf%>%
   pivot_longer(spec_rf:spec_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf%>%
+  pivot_longer(jindex_rf:jindex_xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 
 conf%>%
@@ -686,6 +549,9 @@ conf1<-predresult1%>%
             spec_rf = spec_vec(obs, rf_pred), spec_rftuned = spec_vec(obs, rftuned_pred),
             spec_svm = spec_vec(obs, svm_pred),spec_knn = spec_vec(obs, knn_pred),
             spec_xgboost = spec_vec(obs, xgboost_pred),
+            jindex_rf = j_index_vec(obs, rf_pred), jindex_rftuned = j_index_vec(obs, rftuned_pred),
+            jindex_svm = j_index_vec(obs, svm_pred),jindex_knn = j_index_vec(obs, knn_pred),
+            jindex_xgboost = j_index_vec(obs, xgboost_pred),
             acc_rf = accuracy_vec(obs, rf_pred), acc_rftuned = accuracy_vec(obs, rftuned_pred),
             acc_svm = accuracy_vec(obs, svm_pred),acc_knn = accuracy_vec(obs, knn_pred),
             acc_xgboost = accuracy_vec(obs, xgboost_pred))
@@ -699,9 +565,85 @@ conf1%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 
 conf1%>%
+  pivot_longer(jindex_rf:jindex_xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+
+conf1%>%
   pivot_longer(acc_rf:acc_xgboost, names_to = "metric", values_to = "value")%>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 
 ```
 
 
+What to calculate claim
+```{r}
+claim <- read_feather("process.feather")%>%
+  select(date, client, claims, expected, shrinkage,volume)
+```
+```{r}
+predclaim <-
+predresult %>%
+  inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+```
+```{r}
+predclaim%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(expected:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+
+```{r}
+predclaim1 <-
+predresult1 %>%
+  inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+```
+```{r}
+predclaim1%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(expected:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
+```
+```{r}
+predclaim%>%
+  group_by(client)%>%
+  
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  pivot_longer(claims:xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = value, color = metric)) + geom_line()
+```
+
+```
