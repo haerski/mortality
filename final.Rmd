@@ -1,0 +1,127 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+      fig.width = 5, fig.height = 5, dpi = 300, fig.path = "figures/final-"
+)
+```
+
+# FINAL PRESENTATION
+
+## Data loading and boring stuff
+No need to talk about this.
+Please download the latest version of `data/processed_data_20_12_23.feather` from Google Drive.
+```{r message = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(ggbeeswarm)
+library(finetune)
+library(lubridate)
+library(glue)
+library(slider)
+weekly_data <-
+  read_feather("data/processed_data_20_12_23.feather") %>%
+  select(-ae_2021, -ae_2020, -ae_2019,
+         -actual_2021, -actual_2020, -actual_2019, -adverse,
+         -STATE_NAME, -shrinkage, -dep_var)
+
+yearly_data <-
+  read_feather("data/processed_data_20_12_23.feather") %>%
+  group_by(client) %>%
+  slice(1) %>%
+  select(-date, -claims, -zip_deaths, -smoothed_ae, -shrunk_ae,
+         -class, -smoothed_deaths,
+         -hes, -hes_uns, -str_hes, -ae, -dep_var, -shrinkage, -STATE_NAME, -ihme_deaths)
+```
+
+
+
+
+
+# Introduction
+AEs changing in 2019, 2020, copy paste from pres2
+
+We explain how we choose the threshold for adverse and not
+```{r}
+processed_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(
+      `12.5` = quantile(shrunk_ae, 0.125),
+      `25` = quantile(shrunk_ae, 0.25),
+      `50` = quantile(shrunk_ae, 0.50)
+  ) %>%
+  pivot_longer(-date, names_to = "pth", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = pth)) +
+  geom_line() +
+  geom_hline(yintercept = 2.5, linetype = "dashed")
+```
+
+How many clients are adverse each week?
+```{r}
+processed_data %>%
+  group_by(date) %>%
+  summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
+  ggplot(aes(x = date, y = prop_adverse)) + geom_line()
+```
+# "Baseline" stuff
+Can maybe also copy paste some things from pres 2.
+
+This is trained on known COVID-19 data.
+
+* Why? It can be used as is in a future pandemic.
+* Why not? Future pandemics may have different target mortality compared to COVID19.
+
+# Time stuff
+
+* Why? This model is more reactive than the previous one. It's trained on current pandemic data. It can be updated with time.
+* Why not? This will be very bad early on in the pandemic (lack of data) and bad when forecasting is hard.
+
+## Model selection
+Looking at performance every day for 3 months in the future
+
+## Training on part of the data (forecasted smoothed deaths + IHME)
+Testing on known clients and unknown clients.
+
+### Case study: June 2020
+
+### Case study: Jan 2021
+
+## Predicting AE as a time-series
+Don't take weekly deaths into account. How well/badly can we do?
+
+Train global model for all clients.
+
+Target: shrunk_ae (AE after shrunk).
+Predictors: data before covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees).
+Data pre-processing: log(POP), log(volume),log(expected) and normalize all predictors.
+Split: Train set(2020-03-15 - 2020-12-27), Test set (2021-01-03- 2021-06-27).
+Model: random forest, tuned random forest, Radial basis function support vector machines, K-nearest neighbors, Xgboost. 
+Outcome: predicting shrunk_ae, confident interval for each client every day.
+
+Performance: 
+calculate the predicted total claim every week and every client for half year.
+K-nearest neighbors catch the trend for every week total claim.
+
+Plot the predict result for each client, pick several to present, 
+The confident interval can cover the exact shrunk_ae
+
+Classify whether the client is adverse or not adverse: shrunk_ae > 2.5.
+plot sens, spec,j_index, accuracy
+Xgboost has biggest j_index. K-nearest neighbors has good sens, and worst spec while svm has bad sens and good spec.
+
+
+Currently, we use the predicting shrunk_ae as predicting result for each model. 
+Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
+2. combine different model's results to get final result. 3.Compared the result with weekly death into account, we can add predicted death data as one predictor.
+ 
+
+
+
+
+
+
