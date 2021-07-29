@@ -587,8 +587,8 @@ xgboost_workflow <-
 
 First we forecast `smoothed_deaths`.
 ```{r}
-start <- ymd("2021-01-01")
-end <- ymd("2020-04-04")
+start <- ceiling_date(ymd("2021-01-01"), unit = "week")
+end <- ceiling_date(ymd("2020-04-04"), unit = "week")
 
 forecast <-
   processed_data %>%
@@ -601,8 +601,8 @@ forecast <-
 We plot it to see if it makes sense
 ```{r}
 forecast %>%
-  filter(client == 42) %>%
-  autoplot(processed_data %>% as_tsibble(index = date, key = client) %>% filter(client == 42))
+  filter(client == 30) %>%
+  autoplot(processed_data %>% as_tsibble(index = date, key = client) %>% filter(client == 30))
 ```
 
 Substitute actual deaths after `start` by the forecasted ones
@@ -642,15 +642,179 @@ rset <- manual_rset(list(split), ids = c("Split 1"))
 
 Fit and test
 ```{r}
-xgboost_workflow %>%
+results <-
+  xgboost_workflow %>%
   fit_resamples(
       resamples = rset,
-      control = control_resamples(save_pred = TRUE))
+      control = control_resamples(save_pred = TRUE),
+      metrics = metric_set(yardstick::accuracy, roc_auc, sens, spec, j_index))
+
+
+results %>%
+  collect_metrics()
 
 xgboost_workflow %>%
   fit(analysis(split))
 ```
 
+### Tuning a boosted tree
+We will first split the clients into testing and training
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  unnest(data) %>%
+  pull(rowname) %>%
+  as.integer()
+
+test_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  select(rowname) %>%
+  filter(!rowname %in% train_idx) %>%
+  pull(rowname) %>%
+  as.integer()
+
+init <- make_splits(list(analysis = train_idx, assessment = test_idx), data = forecasted_data)
+```
+
+Next, we pick the last 3 months of 2020 as a testing set and everything before that as training.
+We use 10-fold CV on each client. We will use the 3 months before 2021-01-01 as training, and 2021-01-01 as testing.
+```{r}
+make_cv <-
+  training(init) %>%
+  rownames_to_column() %>%
+  group_by(client) %>%
+  nest() %>%
+  vfold_cv() %>%
+  mutate(
+    an = map(splits, ~ analysis(.) %>% unnest(data) %>% ungroup()),
+    as = map(splits, ~ assessment(.) %>% unnest(data) %>% ungroup())) %>%
+  mutate(
+    an_idx = map(an, ~ filter(., date <= start - months(3)) %>% pull(rowname) %>% as.integer()),
+    as_idx = map(as, ~ filter(., date == start) %>% pull(rowname) %>% as.integer())) %>%
+  mutate(splits = map2(an_idx, as_idx, ~ make_splits(list(analysis = .x, assessment = .y), data = training(init)))) %>%
+  select(splits, id)
+
+resamp <- manual_rset(make_cv$splits, make_cv$id)
+```
+
+Define an XGBoost model
+```{r}
+xgboost_recipe <-
+  recipe(formula = class ~ ., data = processed_data) %>%
+  step_rm(zip3, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, dep_var, shrinkage) %>%
+  step_rm(STATE_NAME, date) %>%
+  step_zv(all_predictors())
+
+xgboost_spec <-
+  boost_tree(trees = 15, min_n = 1, tree_depth = tune(), learn_rate = tune(), loss_reduction = 0, sample_size = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("xgboost", nthread = 8)
+
+xgboost_workflow <-
+  workflow() %>%
+  add_recipe(xgboost_recipe) %>%
+  add_model(xgboost_spec)
+```
+
+We look at results
+```{r cache = TRUE}
+res <-
+  xgboost_workflow %>%
+  tune_grid(
+      resamples = resamp,
+      grid = 10,
+      control = control_grid(save_pred = FALSE, verbose = TRUE, parallel_over = "everything"),
+      metrics = metric_set(yardstick::accuracy, roc_auc, sens, spec, j_index))
+
+res %>% show_best(metric = "roc_auc")
+.Last.value
+autoplot(res)
+
+parms <-
+  xgboost_workflow %>%
+  parameters()
+
+res <-
+  xgboost_workflow %>%
+  tune_sim_anneal(
+      resamples = resamp,
+      param_info = parms,
+      initial = res,
+      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+
+
+res %>% show_best(metric = "roc_auc")
+.Last.value
+autoplot(res)
+
+parms <-
+  parms %>%
+  update(learn_rate = learn_rate(c(-7.5, -2.5)))
+
+
+res <-
+  xgboost_workflow %>%
+  tune_sim_anneal(
+      resamples = resamp,
+      param_info = parms,
+      initial = res,
+      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+
+
+res %>% show_best(metric = "roc_auc")
+.Last.value
+autoplot(res)
+
+
+parms <-
+  parms %>%
+  update(learn_rate = learn_rate(c(-7, -5)))
+
+res <-
+  xgboost_workflow %>%
+  tune_sim_anneal(
+      resamples = resamp,
+      param_info = parms,
+      initial = res,
+      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+
+
+res %>% show_best(metric = "roc_auc")
+.Last.value
+autoplot(res)
+
+bst <- res %>% select_best(metric = "roc_auc")
+
+xgboost_workflow <- finalize_workflow(xgboost_workflow, bst)
+```
+
+Now we train on all clients prior to 2021-01-01 and test on 20201-04-04
+```{r}
+train_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(date <= start) %>%
+  pull(rowname) %>% as.integer()
+
+test_idx <-
+  forecasted_data %>%
+  rownames_to_column() %>%
+  filter(date == end) %>%
+  pull(rowname) %>% as.integer()
+
+s1 <- make_splits(list(analysis = train_idx, assessment = test_idx), data = forecasted_data)
+rs <- manual_rset(list(s1), c("all_clients"))
+
+xgboost_workflow %>%
+  last_fit(s1, metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+```
+
+Next we train on **some** clients, and test on the unseen clients!!!
 
 
 
