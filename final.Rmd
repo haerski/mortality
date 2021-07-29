@@ -543,108 +543,6 @@ split
   
   #crossval <- vfold_cv(training(splits), strata = zip3)
 ```
-#window forest
-It is not good 
-```{r cache= TRUE }
-model_spec <- window_reg(
-        window_size     = "6 months",
-        id = "client"
-    ) %>%
-    # Extra parameters passed as: set_engine(...)
-    set_engine(
-        engine          = "window_function",
-        #window_function = median,
-        na.rm           = TRUE,
-        window_function = ~ tail(.x, 100),
-    )
-
-# Fit Spec
-model_fit <- model_spec %>%
-    fit(shrunk_ae~ date + client, data = train)
-model_fit
-predict(model_fit, test)
-
-
-model_tbl <- modeltime_table(
-    model_fit)
-
-model_tbl %>%
-    modeltime_forecast(
-        new_data    = testing(splits),
-        actual_data = bind_rows(training(splits), testing(splits)),
-        conf_by_id  = TRUE
-    ) %>%
-    group_by(client) %>%
-    filter(client == c( "1", "5", "7"))%>%
-    plot_modeltime_forecast(
-        .facet_ncol  = 3,
-        .interactive = FALSE,
-        .title = "Forecast Plot",
-        .line_alpha = 0.6,
-        .line_size = 1,
-        .y_intercept = 3.0
-    )
-calib_tbl <- model_tbl %>%
-    modeltime_calibrate(
-      new_data = testing(splits), 
-      id       = "client"
-    )
-calib_tbl %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
-calib_tbl %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
-
-```
-
-```{r}
-result0 <- calib_tbl %>%
-    modeltime_forecast(
-        new_data    = testing(splits),
-        actual_data = bind_rows(training(splits), testing(splits)),
-        conf_by_id  = TRUE
-    ) 
-result0
-```
-```{r}
-predresult0 <- result0 %>%
-  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
-  rename(model = .model_id, value = .value, date= .index)%>%
-  relocate(model, value, .after = client)%>%
-  pivot_wider(names_from = model, values_from =value)%>%
-  rename(actual = "NA", windows = "1" )%>%
-  drop_na()%>%
-  mutate(obs =  ifelse(actual > 2.5, TRUE, FALSE))%>%
-  mutate(windows_pred=  ifelse(windows > 2.5,TRUE, FALSE))%>%
-  mutate(obs = as.factor(obs), windows_pred = as.factor(windows_pred))
-
-conf0<-predresult0%>%
-  group_by(date) %>%
-  summarize(sens_windows = sens_vec(obs, windows_pred),
-            spec_windows = spec_vec(obs, windows_pred), 
-            jinex_window = j_index_vec(obs,windows_pred),
-            acc_windows = accuracy_vec(obs, windows_pred))
-
-conf0%>%
-  pivot_longer(sens_windows, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
-  
-conf0%>%
-  pivot_longer(spec_windows, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
-
-conf0%>%
-  pivot_longer(jinex_window, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
-
-conf0%>%
-  pivot_longer(acc_windows, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = date, y = value, color = metric)) + geom_line()
-
-```
-
-
 
 We now gather our recipes and models.
 Model: random forest, tuned random forest, Radial basis function support vector machines, K-nearest neighbors, Xgboost. 
@@ -666,8 +564,6 @@ rec_obj <-
      step_zv(all_predictors()) %>%
     step_normalize(all_predictors(), -all_nominal())
 
-summary(prep(rec_obj))
-bake(prep(rec_obj),training(splits))
 ```
 
 #engine
@@ -746,7 +642,6 @@ model_tbl <- modeltime_table(
     wflw_knnspec,
     wflw_xgboost
 )
-model_tbl
 ```
 
 #Calibrate by client
@@ -757,17 +652,16 @@ calib_tbl <- model_tbl %>%
       id       = "client"
     )
 
-calib_tbl
 ```
 
 Measure Accuracy on validation data
-```{r}
+```{r eval = FALSE}
 #global error
 calib_tbl %>% 
     modeltime_accuracy(acc_by_id = FALSE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
 ```
-```{r}
+```{r eval = FALSE}
 #local error for each client
 calib_tbl %>% 
     modeltime_accuracy(acc_by_id = TRUE) %>% 
@@ -783,7 +677,6 @@ result <- calib_tbl %>%
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
     ) 
-result
 ```
 ```{r}
 result %>%
@@ -813,9 +706,6 @@ rec_obj1 <-
     step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
      step_zv(all_predictors()) %>%
     step_normalize(all_predictors(), -all_nominal())
-
-summary(prep(rec_obj1))
-bake(prep(rec_obj1),training(splits))
 ```
 
 
@@ -868,7 +758,6 @@ model_tbl1 <- modeltime_table(
     wflw_knnspec1,
     wflw_xgboost1
 )
-model_tbl1
 ```
 
 #Calibrate by client
@@ -879,17 +768,16 @@ calib_tbl1 <- model_tbl1 %>%
       id       = "client"
     )
 
-calib_tbl1
 ```
 
 Measure Accuracy on validation data
-```{r}
+```{r eval= FALSE}
 #global error
 calib_tbl1 %>% 
     modeltime_accuracy(acc_by_id = FALSE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
 ```
-```{r}
+```{r eval = FALSE}
 #local error for each client
 calib_tbl1 %>% 
     modeltime_accuracy(acc_by_id = TRUE) %>% 
@@ -934,9 +822,6 @@ rec_obj2 <-
     step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
      step_zv(all_predictors()) %>%
     step_normalize(all_predictors(), -all_nominal())
-
-summary(prep(rec_obj2))
-bake(prep(rec_obj2),training(splits))
 ```
 # workflow without  death
 ```{r cache= TRUE}
@@ -984,7 +869,6 @@ model_tbl2 <- modeltime_table(
     wflw_knnspec2,
     wflw_xgboost2
 )
-model_tbl2
 ```
 
 #Calibrate by client
@@ -995,17 +879,16 @@ calib_tbl2 <- model_tbl2 %>%
       id       = "client"
     )
 
-calib_tbl2
 ```
 
 Measure Accuracy on validation data
-```{r}
+```{r eval = TRUE}
 #global error
 calib_tbl2 %>% 
     modeltime_accuracy(acc_by_id = FALSE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
 ```
-```{r}
+```{r eval = TRUE}
 #local error for each client
 calib_tbl2 %>% 
     modeltime_accuracy(acc_by_id = TRUE) %>% 
@@ -1021,7 +904,6 @@ result2 <- calib_tbl2 %>%
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
     ) 
-result2
 ```
 ```{r}
 result2 %>%
