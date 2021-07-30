@@ -541,7 +541,7 @@ Possible future improvement: 1. use confident interval to find a better predict 
 
 
 ## Common data
-```{r}
+```{r eval = FALSE}
 library(tidyverse)
 library(tidymodels)
 library(modeltime)
@@ -559,7 +559,7 @@ library(lubridate)
 
 
 Get weeklydata 
-```{r}
+```{r eval = FALSE}
 clients<-read_feather("data/processed_data_20_12_23.feather")%>%
   select(-ae_2021, -ae_2020, -ae_2019,
          -actual_2021, -actual_2020, -actual_2019, -adverse,
@@ -579,7 +579,7 @@ Data pre-processing: log(POP), log(volume),log(expected) and normalize all predi
 Split: Train set(2020-03-15 - 2020-12-27), Test set (2021-01-03- 2021-06-27).
 
 split
-```{r}
+```{r eval = FALSE}
   set.seed(1234)
   splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
   train = training(splits)
@@ -592,7 +592,7 @@ Outcome: predicting shrunk_ae, confident interval for each client every day.
 
 
 #recipe with ihme death data
-```{r}
+```{r eval = FALSE}
 rec_obj <-
     recipe(shrunk_ae ~ ., data = training(splits)) %>%
     #step_rm(year,month,day)%>%
@@ -609,7 +609,7 @@ rec_obj <-
 ```
 
 #engine
-```{r}
+```{r eval = FALSE}
 forest_spec <-
   rand_forest(trees = 1000) %>%
   set_engine("ranger", num.threads = 8, seed = 123456789) %>%
@@ -639,7 +639,7 @@ xgboost_spec <-
 ```
 
 # workflow with ihme death data
-```{r cache= TRUE}
+```{r cache= TRUE, eval = FALSE}
 wflw_rf <- workflow() %>%
     add_model(
         forest_spec
@@ -676,7 +676,7 @@ wflw_xgboost <- workflow() %>%
     fit(data = training(splits))  
 ```
 Create a Modeltime Table
-```{r cache = TRUE}
+```{r cache = TRUE, eval = FALSE}
 model_tbl <- modeltime_table(
     wflw_rf,
     wflw_tunedrf,
@@ -687,7 +687,7 @@ model_tbl <- modeltime_table(
 ```
 
 #Calibrate by client
-```{r}
+```{r eval = FALSE}
 calib_tbl <- model_tbl %>%
     modeltime_calibrate(
       new_data = testing(splits), 
@@ -712,7 +712,7 @@ calib_tbl %>%
 validate the  Test Data
 conf_by_id : produce confidence interval estimates by an ID feature.
 #all results
-```{r cache=TRUE}
+```{r cache=TRUE, eval = FALSE}
 result <- calib_tbl %>%
     modeltime_forecast(
         new_data    = testing(splits),
@@ -720,7 +720,7 @@ result <- calib_tbl %>%
         conf_by_id  = TRUE
     ) 
 ```
-```{r}
+```{r eval = FALSE}
 result %>%
     group_by(client) %>%
     filter(client == c( "1", "5", "7","10", "61","100"))%>%
@@ -751,11 +751,11 @@ Currently, we use the predicting shrunk_ae as predicting result for each model.
 Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
 2. combine different model's results to get final result. 3.Compared the result with weekly death into account, we can add predicted death data as one predictor.
 
-```{r}
+```{r eval = FALSE}
 threshold <- 2.5
 ```
 
-```{r}
+```{r eval = FALSE}
 predresult <- result %>%
   select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
   rename(model = .model_id, value = .value, date= .index)%>%
