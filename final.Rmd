@@ -451,7 +451,7 @@ test_unknown_fore <-
 ```
 
 Train the workflow
-```{r}
+```{r cache = TRUE}
 trained_wf <-
   final_wf %>%
   fit(train)
@@ -474,6 +474,35 @@ tests %>%
   summarize(Accuracy = yardstick::accuracy_vec(class, .pred_class)) %>%
   ggplot(aes(x = date, y = Accuracy, color = id)) + geom_line()
 ```
+
+### Explaining outcomes
+Use DALEX
+```{r}
+library(DALEX)
+library(DALEXtra)
+
+model <-
+  trained_wf %>%
+  extract_fit_parsnip()
+
+recipe <-
+  trained_wf %>%
+  extract_recipe(estimated = TRUE)
+
+exp <- explain(model, recipe %>% bake(train))
+
+test_obs <-
+  test_unknown_fore %>%
+  filter(date == end, client == 397)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot()
+
+trained_wf %>%
+  predict(test_obs, type = "prob")
+```
+
 
 
 
