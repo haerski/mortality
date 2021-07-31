@@ -1,0 +1,145 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+      fig.path = "figures/report/fig-"
+)
+```
+
+
+# Executive summary
+
+# Data wrangling
+
+In this section, we describe our data gathering and tidying process.
+We will be making extensive use of the `tidyverse` family of packages.
+A series of scripts are used to generate tibbles, which are then saved in a `*.feather` for fast loading.
+A full list of scripts can be viewed in the Appendix (TODO!!!)
+```{r message = FALSE}
+library(tidyverse)
+library(feather)
+```
+
+## Data sources
+
+Our dataset consists of two parts: publicly obtained data and simulated clients.
+
+filename | source | description
+---------|--------|------------
+`covid_deaths_usafacts.csv` | [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/) | Cumulative weekly COVID-19 deaths by county
+`soa_base_2017.csv` | (Sent by Douglas Armstrong) | $q_x$ values by gender, age, industry
+
+
+### US Census bureau
+We used the US Census Bureau's API to obtain the 2019 estimates for population and density per county from the Census Bureau's Population Estimates Program (PEP).
+The `censusapi` package provides an R interface to the API.
+Using the API requires an API key, which can be obtained from [here](https://api.census.gov/data/key_signup.html).
+The following snippet fetches the data, and saves the tibble into a file called `pop_den.feather`. See also `data/census.R`.
+```{r eval = FALSE}
+library("censusapi")
+
+Sys.setenv(CENSUS_KEY = "YOUR_KEY_HERE")
+
+# date_code = 12 is an estimate for July 1, 2019
+# total population + density
+pop <- getCensus(
+                 name = "pep/population",
+                 vintage = 2019,
+                 region = "county:*",
+                 vars = c("POP", "DENSITY"),
+                 DATE_CODE = 12)
+pop <- tibble(pop) %>%
+  select(-DATE_CODE)
+write_feather(pop, "pop_den.feather")
+```
+
+See also `data/all_persons.r`.
+
+
+## County to zip3
+
+## Weekly deaths
+See also `data/deaths.R`.
+
+## IHME (state to zip3)
+
+## Simulated client dataset
+The clients we were tasked to study were simulated by Securian Financial.
+The dataset consists of 20 files called `data/simulation_data/experience_weekly_{n}.RDS` and `data/simulation_data/person_{n}.RDS` for $n = 1,\dotsc, 10$.
+In total, we have 500 clients and 1,382,321 individuals.
+
+The `person_{n}.RDS` files contain information such as company, zip code, age, face amount, gender, and collar (blue or white, but in this dataset every indivual was blue collar).
+The rows in `experience_weekly_{n}.RDS` correspond to individuals and weeks, and contains in a flag `deaths` that becomes 1 on the week they die.
+In total, these tables contain 170,025,483 rows, but the same information can be conveyed in 1,382,231 rows by attaching to each individual their death date (or `NA` if they don't die).
+```{r eval = FALSE}
+read_data <- function(n) {
+  exp_name <- str_glue("simulation_data/experience_weekly_{n}.RDS")
+  per_name <- str_glue("simulation_data/person_{n}.RDS")
+  exp <- read_rds(exp_name)
+  per <- read_rds(per_name)
+
+  dies <-
+    exp %>%
+    filter(death > 0) %>%
+    select(client, participant, week, month, year)
+  aug_per <-
+    per %>%
+    left_join(dies, by = c("client", "participant"))
+
+  aug_per
+}
+
+all_persons <- (1:10) %>% map_dfr(read_data)
+```
+
+We noticed that some individuals die more than once. This removes multiple deaths
+```{r eval = FALSE}
+all_persons <-
+  all_persons %>%
+  group_by(client, participant) %>%
+  arrange(year, week, .by_group = TRUE) %>%
+  slice_head()
+```
+
+We finally attach to each individual their yearly $q_x$ value, and save the resuilting tibble in `data/simultation_data/all_persons.feather`.
+
+```{r eval = FALSE}
+qx_table <- read_csv("soa_base_2017.csv")
+
+all_persons <-
+  all_persons %>%
+  left_join(qx_table, by = c("Age", "Sex", "collar")) %>%
+  relocate(qx, .after = collar)
+
+write_feather(all_persons %>% ungroup(), "simulation_data/all_persons.feather")
+```
+
+## Other cleanup
+Bad zipcodes
+
+## Final merged tibble
+
+# Long-term model
+
+## Intro
+
+## Methods
+
+## Results
+
+
+# Short-term model
+
+## Intro
+
+## Methods
+
+## Results
+
+# Conclusion
+
+# Appendices
+
+## Data repository
+
+## R scripts
+
+## Rmd files

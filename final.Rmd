@@ -41,6 +41,10 @@ yearly_data <-
          -hes, -hes_uns, -str_hes, -ae, -dep_var, -shrinkage, -STATE_NAME, -ihme_deaths)
 ```
 
+Make figure background transparent
+```{r}
+theme_update(plot.background = element_rect(fill = "transparent", colour = NA))
+```
 
 
 
@@ -69,7 +73,8 @@ How many clients are adverse each week?
 weekly_data %>%
   group_by(date) %>%
   summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
-  ggplot(aes(x = date, y = prop_adverse)) + geom_line()
+  ggplot(aes(x = date, y = prop_adverse)) + geom_line() +
+  labs(y = "Proportion of clients w/ adverse mortality", x = "Date")
 ```
 # "Baseline" stuff
 Can maybe also copy paste some things from pres 2.
@@ -97,7 +102,7 @@ test <-
 ```
 
 
-```{r}
+```{r cache = TRUE}
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
@@ -201,7 +206,7 @@ sln_wf <-
 ```
 
 
-```{r}
+```{r cache = TRUE}
 wflows <- tribble(~wflow ,
                   sln_wf,
                   knn_wf, log_wf, forest_wf, bt_wf)
@@ -270,26 +275,295 @@ wflows_cheat %>%
 ## Training on part of the data (forecasted smoothed deaths + IHME)
 Testing on known clients and unknown clients.
 
-### Case study: June 2020
+We first split our clients into testing and training.
+```{r}
+set.seed(1213)
+training_clients <-
+  weekly_data %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  pull(client)
+
+testing_clients <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  pull(client) %>%
+  unique()
+```
+
+The training clients are "known"; they will be what the model will be trained on.
+The testing clients are "unknown"; they will represent brand new clients.
 
 ### Case study: Jan 2021
 
-## Predicting AE as a time-series
-Don't take weekly deaths into account. How well/badly can we do?
+We will also define a training and testing date. For training, we use every date before Jan 1st 2021, and we test on Jan 2nd - Apr 1st.
+```{r}
+start <- ceiling_date(ymd("2021-01-01"), unit = "week")
+end <- ceiling_date(ymd("2021-04-01"), unit = "week")
+```
 
-Train global model for all clients.
+Next we tune a boosted tree model to the training clients. For tuning purposes, we divide the training dates into analysis and assessment dates. The analysis dates will be all dated before Oct 1st, and assessment will be Jan 1st.
+
+```{r}
+analys <- ceiling_date(ymd("2020-10-01"), unit = "week")
+assess <- start
+```
+
+To assess the performance of our model, we split the training clients into analysis and assessment.
+We could (should?) also do cross-validation.
+```{r}
+set.seed(123)
+ana_clients <-
+  training_clients %>%
+  sample(length(.) * 3 / 4)
+
+ana_idx <-
+  weekly_data %>%
+  rownames_to_column() %>%
+  filter(client %in% ana_clients & date <= analys) %>%
+  pull(rowname) %>% as.integer()
+
+ass_idx <-
+  weekly_data %>%
+  rownames_to_column() %>%
+  filter(client %in% training_clients) %>%
+  filter(!client %in% ana_clients & date == assess) %>%
+  pull(rowname) %>%
+  as.integer()
+
+spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly_data)
+resmpl <- manual_rset(list(spl), c("foo"))
+```
+
+We describe our model. We use XGBoost
+```{r}
+xgboost_recipe <-
+  recipe(formula = class ~ ., data = weekly_data) %>%
+  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae) %>%
+  step_zv(all_predictors())
+
+xgboost_spec <-
+  boost_tree(trees = tune(), tree_depth = tune(), learn_rate = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("xgboost", nthread = 8)
+
+xgboost_workflow <-
+  workflow() %>%
+  add_recipe(xgboost_recipe) %>%
+  add_model(xgboost_spec)
+```
+
+Now we tune! We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
+```{r cache = TRUE, collapse = TRUE}
+set.seed(98324)
+res_grd <-
+  xgboost_workflow %>%
+  tune_grid(
+    resamples = resmpl,
+    grid = 10,
+    metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy),
+    control = control_grid(verbose = TRUE))
+
+res <-
+  xgboost_workflow %>%
+  tune_sim_anneal(
+      resamples = resmpl,
+      iter = 20,
+      initial = res_grd,
+      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+```
+
+The best parameter values are
+```{r}
+res %>% show_best(metric = "roc_auc")
+best_parms <- res %>% select_best(metric = "roc_auc")
+
+best_parms <- tribble(
+        ~trees, ~tree_depth, ~learn_rate,
+        517, 10, 0.001312986874346298)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          138, 6, 0.07662993111378884)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          1939,2,0.005523512626608967)
+```
+
+We apply these parameters to our workflow
+```{r}
+final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
+```
+
+We now need to forecast 3 months worth of `smoothed_deaths`.
+```{r cache = TRUE}
+forecast <-
+  weekly_data %>%
+  filter(date >= "2020-03-15" & date <= start) %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+```{r}
+future <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  rename(smoothed_deaths = .mean)
+
+forecast_data <-
+  weekly_data %>%
+  rows_update(future, by = c("date","client"))
+```
+
+
+
+We define our training 
+```{r}
+train <-
+  weekly_data %>%
+  filter(client %in% training_clients & date <= start)
+```
+
+We will have several version of the testing set. Some of them will be known or unknown, some will be forecasted and true.
+```{r}
+test_known_true <-
+  weekly_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_true <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_known_fore <-
+  forecast_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_fore <-
+  forecast_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+```
+
+Train the workflow
+```{r cache = TRUE}
+trained_wf <-
+  final_wf %>%
+  fit(train)
+```
+
+Look at results one by one
+```{r}
+tests <-
+  tribble(
+    ~id, ~set,
+    # "known true", test_known_true,
+    # "unknown true", test_unknown_true,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line() +
+  labs(x = "Date", y = "Accuracy", color = "")
+```
+```{r fig.width = 5.5}
+tests <-
+  tribble(
+    ~id, ~set,
+    "Known clients, true deaths", test_known_true,
+    "Unknown clients, true deaths", test_unknown_true,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line(aes(linetype = str_detect(id, "true"))) +
+  labs(x = "Date", y = "Accuracy", color = "") + guides(linetype = "none")
+```
+
+### Explaining outcomes
+Use DALEX
+```{r fig.height = 5, fig.width = 5}
+library(DALEX)
+library(DALEXtra)
+
+model <-
+  trained_wf %>%
+  extract_fit_parsnip()
+
+recipe <-
+  trained_wf %>%
+  extract_recipe(estimated = TRUE)
+
+exp <- explain(model, recipe %>% bake(train))
+test_obs <-
+  test_unknown_fore %>%
+  filter(date == end, client == 397)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 397")
+
+test_obs <-
+  test_known_fore %>%
+  filter(date == end, client == 405)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 405")
+```
+
+
+
+
+### Case study: June 2020
+
+
+## Predicting AE as a time-series
+Main Package: Modeltime
+
+Create a global model for all clients
 
 Target: shrunk_ae (AE after shrunk).
+
 Predictors: data before covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees).
-Data pre-processing: log(POP), log(volume),log(expected) and normalize all predictors.
+
+We compare the result with IHME-death/ with  zip-death/without death 
+
+Data pre-processing: log(POP), log(volume),log(expected) and normalize all predictors
+
 Split: Train set(2020-03-15 - 2020-12-27), Test set (2021-01-03- 2021-06-27).
+
 Model: random forest, tuned random forest, Radial basis function support vector machines, K-nearest neighbors, Xgboost. 
+
 Outcome: predicting shrunk_ae, confident interval for each client every day.
 
 Performance: 
-calculate the predicted total claim every week and every client for half year.
-K-nearest neighbors catch the trend for every week total claim.
-
 Plot the predict result for each client, pick several to present, 
 The confident interval can cover the exact shrunk_ae
 
@@ -297,14 +571,666 @@ Classify whether the client is adverse or not adverse: shrunk_ae > 2.5.
 plot sens, spec,j_index, accuracy
 Xgboost has biggest j_index. K-nearest neighbors has good sens, and worst spec while svm has bad sens and good spec.
 
+Calculate the predicted total claim every week and every client for half year according the predicting shrunk_ae.
+K-nearest neighbors, Xgboost, svm can catch the trend for every week total claim.
+
+For each client, the predicted claim is not good since it is a global model for all clients
 
 Currently, we use the predicting shrunk_ae as predicting result for each model. 
 Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
 2. combine different model's results to get final result. 3.Compared the result with weekly death into account, we can add predicted death data as one predictor.
- 
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+
+## Common data
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(timetk)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(dplyr)
+library(lubridate)
+```
 
 
 
+Get weeklydata 
+```{r}
+clients<-read_feather("data/processed_data_20_12_23.feather")%>%
+  select(-ae_2021, -ae_2020, -ae_2019,
+         -actual_2021, -actual_2020, -actual_2019, -adverse,
+         -STATE_NAME, -dep_var, -smoothed_ae)%>%
+  filter(date >= "2020-03-15")%>%
+  mutate(client = as.factor(client))%>%
+  mutate(POP=log(POP))%>%
+  mutate(volume = log(volume))%>%
+  mutate(expected = log(expected))
+```
+
+Train global model for all clients.
+
+Target: shrunk_ae (AE after shrunk).
+Predictors: data before covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees).
+Data pre-processing: log(POP), log(volume),log(expected) and normalize all predictors
+Split: Train set(2020-03-15 - 2020-12-27), Test set (2021-01-03- 2021-06-27).
+
+split
+```{r}
+  set.seed(1234)
+  splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
+  train = training(splits)
+  test = testing(splits)
+  #index <- unique(train$client)
+  #val <- sliding_index(training(splits), index)
+  
+  #crossval <- vfold_cv(training(splits), strata = zip3)
+```
+
+We now gather our recipes and models.
+Model: random forest, tuned random forest, Radial basis function support vector machines, K-nearest neighbors, Xgboost. 
+Outcome: predicting shrunk_ae, confident interval for each client every day.
 
 
+#recipe with ihme death data
+```{r cache=TRUE}
+rec_obj <-
+    recipe(shrunk_ae ~ ., data = training(splits)) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    step_rm( claims , class, shrinkage, ae,zip_deaths, smoothed_deaths)%>%
+    #step_rm(adverse)%>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
+    step_normalize(all_predictors(), -all_nominal())
+```
 
+#recipe with zip death
+```{r}
+rec_obj1 <-
+    recipe(shrunk_ae ~ ., data = training(splits)) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    step_rm( claims , class, shrinkage, ae,smoothed_deaths, ihme_deaths)%>%
+    #step_rm(adverse)%>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
+    step_normalize(all_predictors(), -all_nominal())
+```
+
+#recipe without  death
+```{r}
+rec_obj2 <-
+    recipe(shrunk_ae ~ ., data = training(splits)) %>%
+    #step_rm(year,month,day)%>%
+    step_rm(zip3)%>%
+    step_rm( claims , class, shrinkage, ae,smoothed_deaths, ihme_deaths, zip_deaths)%>%
+    #step_rm(adverse)%>%
+    step_mutate(client = droplevels(client)) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(date)%>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
+     step_zv(all_predictors()) %>%
+    step_normalize(all_predictors(), -all_nominal())
+```
+
+#engine
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  #set_mode("classification") %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  #set_mode("classification")
+  set_mode("regression")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  #set_mode("classification")
+  set_mode("regression")
+xgboost_spec <-
+  boost_tree(trees = 100) %>%
+  set_engine("xgboost") %>%
+  #set_mode("classification")
+  set_mode("regression")
+```
+
+# workflow with ihme death data
+```{r eval = FALSE}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+
+#Create a Modeltime Table (table of model)
+model_tbl<- modeltime_table(
+    wflw_rf,
+    wflw_tunedrf,
+    wflw_svmrbf,
+    wflw_knnspec,
+    wflw_xgboost
+)
+```
+# workflow with zip death
+```{r eval= FALSE}
+wflw_rf1 <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf1 <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf1 <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_knnspec1 <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost1 <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))  
+#Create a Modeltime Table
+model_tbl1 <- modeltime_table(
+    wflw_rf1,
+    wflw_tunedrf1,
+    #wflw_neural,
+    wflw_svmrbf1,
+    #wflw_svmpoly,
+    wflw_knnspec1,
+    wflw_xgboost1
+)
+
+```
+# workflow without  death
+```{r eval = FALSE}
+wflw_rf2 <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf2 <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf2 <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))
+
+wflw_knnspec2 <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost2 <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))  
+#Create a Modeltime Table
+model_tbl2 <- modeltime_table(
+    wflw_rf2,
+    wflw_tunedrf2,
+    wflw_svmrbf2,
+    wflw_knnspec2,
+    wflw_xgboost2
+)
+```
+
+```{r eval = FALSE}
+#save the model table 
+saveRDS(model_tbl, "modelwithIHME.rds")
+#save the model table 
+saveRDS(model_tbl1, "modelwithzipdeath.rds")
+#save the model table 
+saveRDS(model_tbl2, "modelwithoutdeath.rds")
+```
+Read the model
+```{r}
+model_tbl <- readRDS("modelwithIHME.rds")
+model_tbl1 <- readRDS("modelwithzipdeath.rds")
+model_tbl2 <- readRDS("modelwithoutdeath.rds")
+```
+Calibrate the model to testing set. Forecasting predictions and residuals that are calculated from out-of-sample data.
+```{r eval = FALSE}
+#with HIME
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+#with zip death
+calib_tbl1 <- model_tbl1 %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+#without death
+calib_tbl2 <- model_tbl2 %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+```
+Measure Accuracy on validation data
+```{r eval = FALSE}
+#with HIME death
+#global error
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+
+#local error for each client
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+#with zip death
+#global error
+calib_tbl1 %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+#local error for each client
+calib_tbl1 %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+#without death data
+#global error
+calib_tbl2 %>% 
+    modeltime_accuracy(acc_by_id = FALSE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+#local error for each client
+calib_tbl2 %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
+Forecast. (conf_by_id : produce confidence interval estimates by an ID feature)
+```{r eval = FALSE}
+#with HIME death
+result <- calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+#with zip death
+result1 <- calib_tbl1 %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+#without death
+result2 <- calib_tbl2 %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+```
+```{r eval = FALSE}
+#save the result table 
+saveRDS(result, "resultwithIHME.rds")
+#save the model table 
+saveRDS(result1, "resultwithzipdeath.rds")
+#save the model table 
+saveRDS(result2, "resultwithoutdeath.rds")
+```
+Read the model
+```{r}
+result <- readRDS("resultwithIHME.rds")
+result1 <- readRDS("resultwithzipdeath.rds")
+result2 <- readRDS("resultwithoutdeath.rds")
+```
+
+```{r}
+result %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot with HIME death ",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+result1 %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot with zip death ",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+result2 %>%
+    group_by(client) %>%
+    filter(client == c( "1", "5", "7","10", "61","100"))%>%
+    plot_modeltime_forecast(
+        .facet_ncol  = 3,
+        .interactive = FALSE,
+        .title = "Forecast Plot without death data",
+        .line_alpha = 0.6,
+        .line_size = 1,
+        .y_intercept = 3.0
+    )
+```
+
+#plot sens, spec, accuracy, j_index
+#result : with IHME death
+#result1: with zip death
+#result2: without death
+
+Classify whether the client is adverse or not adverse: shrunk_ae > 2.5.
+plot sens, spec,j_index, accuracy
+Xgboost has biggest j_index. K-nearest neighbors has good sens, and worst spec while svm has bad sens and good spec.
+
+Calculate the predicted total claim every week and every client for half year.
+K-nearest neighbors, Xgboost, svm can catch the trend for every week total claim.
+
+For each client, the result is not good since it is a global model for all clients
+
+Currently, we use the predicting shrunk_ae as predicting result for each model. 
+Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
+2. combine different model's results to get final result. 3.Compared the result with weekly death into account, we can add predicted death data as one predictor.
+
+```{r}
+threshold <- 2.5
+```
+```{r, fig.width=12}
+result %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", "Random forest" = "1", "Tuned random forest" = "2", "Support vector machines" = "3", "K-nearest neighbors" = "4", Xgboost = "5" )%>%
+  drop_na()%>%
+  pivot_longer("Random forest":Xgboost, names_to = "model", values_to = "predict")%>%
+  relocate(model,.before = date)%>%
+  mutate(obs = actual > threshold, predict_class = predict > threshold)%>%
+  mutate(obs = as.factor(obs), predict_class = as.factor(predict_class))%>%
+  group_by(date, model) %>%
+  summarize(Sensitivity = sens_vec(obs, predict_class),
+            Specifity = spec_vec(obs, predict_class),
+            Accuracy = accuracy_vec(obs, predict_class),.groups = "keep")%>%
+  pivot_longer(Sensitivity:Accuracy, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = model)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)+
+  ggtitle("With IHME death data")
+
+result1 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", "Random forest" = "1", "Tuned random forest" = "2", "Support vector machines" = "3", "K-nearest neighbors" = "4", Xgboost = "5" )%>%
+  drop_na()%>%
+  pivot_longer("Random forest":Xgboost, names_to = "model", values_to = "predict")%>%
+  relocate(model,.before = date)%>%
+  mutate(obs = actual > threshold, predict_class = predict > threshold)%>%
+  mutate(obs = as.factor(obs), predict_class = as.factor(predict_class))%>%
+  group_by(date, model) %>%
+  summarize(Sensitivity = sens_vec(obs, predict_class),
+            Specifity = spec_vec(obs, predict_class),
+            Accuracy = accuracy_vec(obs, predict_class),.groups = "keep")%>%
+  pivot_longer(Sensitivity:Accuracy, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = model)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)+
+  ggtitle("With zip death data")
+
+result2 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", "Random forest" = "1", "Tuned random forest" = "2", "Support vector machines" = "3", "K-nearest neighbors" = "4", Xgboost = "5" )%>%
+  drop_na()%>%
+  pivot_longer("Random forest":Xgboost, names_to = "model", values_to = "predict")%>%
+  relocate(model,.before = date)%>%
+  mutate(obs = actual > threshold, predict_class = predict > threshold)%>%
+  mutate(obs = as.factor(obs), predict_class = as.factor(predict_class))%>%
+  group_by(date, model) %>%
+  summarize(Sensitivity = sens_vec(obs, predict_class),
+            Specifity = spec_vec(obs, predict_class),
+            Accuracy = accuracy_vec(obs, predict_class),.groups = "keep")%>%
+  pivot_longer(Sensitivity:Accuracy, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = model)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)+
+  ggtitle("Without death data")
+```
+calculate predict claims
+```{r}
+claim <- read_feather("data/processed_data_20_12_23.feather")%>%
+  select(date, client, claims, expected, shrinkage,volume)
+```
+```{r}
+predclaim<-result %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+ inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+predclaim1<-result1 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+ inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+predclaim2<-result2 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+ inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+```
+Weekly total claims vs predicted claims
+```{r , fig.width=12}
+predclaim%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
+  pivot_longer(expected:Xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()+
+  ggtitle(" Weekly total claim with IHME death")
+
+predclaim1%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
+  pivot_longer(expected:Xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()+
+  ggtitle(" Weekly total claim with zip death")
+
+predclaim2%>%
+  group_by(date)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+   rename( "Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
+  pivot_longer(expected:Xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = date, y = value, color = metric)) + geom_line()+
+  ggtitle(" Weekly total claim without death")
+```
+Half year total claims for each client vs predicted total claims
+```{r , fig.width=12}
+predclaim%>%
+  filter(client == c(1:50))%>%
+  group_by(client)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
+  pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with IHME death")
+
+predclaim1%>%
+  #mutate(client = as.numeric(client))%>%
+  filter(client == c(1:50))%>%
+  group_by(client)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
+  pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with zip death")
+
+predclaim2%>%
+  #mutate(client = as.numeric(client))%>%
+  filter(client == c(1:50))%>%
+  group_by(client)%>%
+  summarise(expected = sum(expected)/52.18,
+        claims = sum(claims),
+          rf =sum(rf) ,
+         rf_tuned = sum(rf_tuned),
+         svm_rbd = sum(svm_rbd) ,
+         knn = sum(knn),
+         xgboost= sum(xgboost))%>%
+  rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
+  pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
+  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client without death data")
+```
