@@ -3,7 +3,7 @@ knitr::opts_chunk$set(
       fig.path = "figures/report/fig-",
       cache.path = "cache/report/")
 #Don't print warning and message in knit
-knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+# knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
 ```
 
 # Executive summary
