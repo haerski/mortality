@@ -1,0 +1,485 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 6, fig.height = 6, dpi = 150, fig.path = "figures/time-"
+)
+```
+
+# Time-based models
+Here we will look at what happens when time-dependent data is added. At the moment, we only use deaths per day per zipcode
+
+## Data wrangling
+This is going to be mostly the same as `baseline_models.Rmd`. Refer to that file for more details.
+Note that here we're not extracting the AEs.
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(feather)
+# library(arrow)
+library(magrittr)
+library(skimr)
+library(lubridate)
+library(timetk)
+library(modeltime)
+library(glue)
+library(slider)
+per <- read_feather("data/simulation_data/all_persons.feather")
+
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt)
+  )
+
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+```{r}
+deaths <-
+  read_feather("data/deaths_zip3.feather") %>%
+  mutate(date = ceiling_date(date, unit = "week")) %>%
+  group_by(zip3, date) %>%
+  summarize(totdeaths = max(deaths)) %>%
+  mutate(zip_deaths = totdeaths - lag(totdeaths, default = 0)) %>%
+  select(-totdeaths) %>%
+  ungroup()
+```
+
+Next we look at the deaths only
+```{r}
+per %<>%
+  drop_na() %>%
+  select(-month)
+```
+
+2019 didn't have 53 weeks, so the deaths on week 53 in 2019 will be changed to death in week 1 of 2020.
+
+Now back to the 53 week business
+```{r}
+wk53 <-
+  per %>%
+  filter(year == 2019, week == 53) %>%
+  mutate(year = 2020, week = 1)
+per %<>%
+  rows_update(wk53, by = c("client", "participant"))
+```
+
+The tibble `per` contains all the people that die and their deathweek. Everyone should die only once now! Let's convert the week and year into the last date of that week.
+
+```{r}
+per %<>%
+  nest_by(week, year) %>%
+  mutate(date = ceiling_date(ymd(glue("{year}-01-01")) + weeks(week - 1), unit = "week")) %>%
+  ungroup() %>%
+  select(-week, -year) %>%
+  unnest(cols = c(data))
+```
+
+Next, we need some kind of a rolling count for AE. Looks like the package `slider` might help.
+I want actual claims per week for each client.
+We note that there are 4 clients that won't have any deaths
+```{r}
+no_deaths <-
+  clients %>%
+  anti_join(per, by = "client") %>%
+  select(client) %>%
+  mutate(date = ceiling_date(ymd("2019-01-01"), unit = "week"), claims = 0)
+```
+
+We compute face amount per week for each client. This number is 0 if the client has no deaths that week.
+```{r}
+weekly_claims <-
+  per %>%
+  group_by(date, client) %>%
+  summarize(claims = sum(FaceAmt), .groups = "drop") %>%
+  bind_rows(no_deaths) %>%
+  complete(date, client, fill = list(claims = 0))
+```
+
+We now have 65,369 rows, which is 131 weeks * 499 clients.
+
+Let's merge everything.
+```{r}
+weekly_data <-
+  clients %>%
+  left_join(weekly_claims, by = c("client")) %>%
+  relocate(date) %>%
+  relocate(claims, .after = zip3) %>%
+  left_join(deaths, by = c("date", "zip3")) %>%
+  relocate(zip_deaths, .after = claims) %>%
+  mutate(zip_deaths = replace_na(zip_deaths, 0), ae = claims / (expected / 52.18))
+```
+
+We add a rolling AE number. We will smooth the actual claims number of each week by taking a weighted average of actual claims in the 13 weeks prior. The weights come from a Gaussian distribution...
+The function `sliding_smoother` takes a vector and outputs a vector of smoothed values.
+
+The below picture show what the smoother does for claims of client 7. We also show a 3 month mean AE
+```{r}
+smoother <- function(x) { weighted.mean(x, dnorm(seq(-1, 0, length.out = length(x)), sd = 0.33)) }
+sliding_smoother <-
+  slidify(smoother, .period = 13, .align = "right")
+
+sliding_mean <-
+  slidify(mean, .period = 13, .align = "right")
+
+
+weekly_data %>%
+  filter(client == 7) %>%
+  ggplot(aes(x = date)) +
+  # geom_line(aes(y = sliding_mean(claims)), color = "red") +
+  # geom_line(aes(y = smooth_vec(claims, period = 13)), color = "blue") +
+  geom_line(aes(y = sliding_smoother(ae)), color = "magenta") +
+  geom_line(aes(y = sliding_mean(ae)), color = "red") +
+  geom_line(aes(y = ae), linetype = 2)
+```
+
+We add a column called `smoothed_ae` and `smoothed_deaths`.
+```{r}
+weekly_data <-
+  weekly_data %>%
+  group_by(client) %>%
+  mutate(smoothed_ae = sliding_smoother(ae), smoothed_deaths = sliding_smoother(zip_deaths), .before = size) %>%
+  drop_na()
+```
+
+We plot the average AE for each week. This is pretty crazy...
+```{r}
+weekly_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(avg_ae = mean(smoothed_ae), sd = sd(smoothed_ae)) %>%
+  ggplot(aes(x = date, y = avg_ae)) +
+  geom_line() +
+  geom_hline(yintercept = 1, linetype = "dashed")
+  # geom_errorbar(aes(ymin = avg_ae - sd, ymax = avg_ae + sd))
+```
+
+```{r}
+weekly_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(avg_deaths = mean(zip_deaths / POP)) %>%
+  ggplot(aes(x = date, y = avg_deaths)) + geom_line()
+```
+
+Let compute the 25th percentile AE of each week. We will pick the threshold for `adverse` based on this.
+```{r}
+weekly_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(
+      `12.5` = quantile(smoothed_ae, 0.125),
+      `25` = quantile(smoothed_ae, 0.25),
+      `50` = quantile(smoothed_ae, 0.50)
+  ) %>%
+  pivot_longer(-date, names_to = "pth", values_to = "smoothed_ae") %>%
+  ggplot(aes(x = date, y = smoothed_ae, color = pth)) +
+  geom_line() +
+  geom_hline(yintercept = 1, linetype = "dashed")
+```
+
+
+Maybe there is a better number to look at than smoothed ae. Let's shrink smoothed ae based on the log(Volume * average qx). This gives us some kind of a measure of client size and mortality.
+```{r}
+client_shrinkage <-
+  weekly_data %>%
+  summarize(dep_var = first(volume * avg_qx)) %>%
+  mutate(shrinkage = rescale(log(dep_var), to = c(0.3, 1)))
+
+ggplot(client_shrinkage, aes(x = dep_var)) + geom_density() + scale_x_log10()
+
+processed_data <-
+  weekly_data %>%
+  left_join(client_shrinkage, by = "client") %>%
+  ungroup() %>%
+  mutate(shrunk_ae = smoothed_ae * shrinkage, .after = smoothed_ae)
+
+processed_data %>%
+  group_by(date) %>%
+  summarize(avg_ae = mean(shrunk_ae)) %>%
+  ggplot(aes(date, avg_ae)) + geom_line()
+
+
+processed_data %>%
+  ungroup() %>%
+  group_by(date) %>%
+  summarize(
+      `12.5` = quantile(shrunk_ae, 0.125),
+      `25` = quantile(shrunk_ae, 0.25),
+      `50` = quantile(shrunk_ae, 0.50)
+  ) %>%
+  pivot_longer(-date, names_to = "pth", values_to = "value") %>%
+  ggplot(aes(x = date, y = value, color = pth)) +
+  geom_line() +
+  geom_hline(yintercept = 2.5, linetype = "dashed")
+```
+
+
+
+
+We will choose "smoothed, shrunk 3 month AE" > 2.5 as "Adverse".
+```{r}
+processed_data <-
+  processed_data %>%
+  ungroup() %>%
+  mutate(class = factor(if_else(shrunk_ae > 2.5, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = shrunk_ae)
+```
+
+
+How many clients are adverse each week?
+```{r}
+processed_data %>%
+  group_by(date) %>%
+  summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
+  ggplot(aes(x = date, y = prop_adverse)) + geom_line()
+```
+
+# Modeling (with tidyverts)
+
+## Case study: Jan 1st 2021
+
+### ARIMA on zip_deaths + random forest
+
+We will travel back in time. We will attempt to predict six months worth of "averse" variables for all clients.
+```{r}
+library(tsibble)
+library(fable)
+
+data_tsibble <-
+  processed_data
+  # mutate(yw = yearweek(date), .before = date, .keep = "unused")
+
+# splits <-
+#   data_tsibble %>%
+#   filter(date >= "2020-03-15") %>%
+#   nest_by(date) %>%
+#   sliding_index(index = date,
+#                 lookback = weeks(12),
+#                 assess_stop = weeks(26))
+
+# split <- splits %>% pluck(1, 3)
+# train <- training(split) %>% unnest(data)
+# test <- testing(split) %>% unnest(data)
+train <-
+  processed_data %>%
+  filter(date <= "2021-01-01")
+
+test <-
+  processed_data %>%
+  filter(date > "2021-01-01" & date <= "2021-06-01")
+```
+
+
+Here we will manually forecast future `zip_deaths` using a fully default ARIMA forecaster. Maybe we should actually predict a smoothed version of `zip_deaths`???
+We plot total deaths vs total forecasted deaths (in the zip codes of our clients). It's not great but it's something...
+```{r cache = TRUE}
+forecast <-
+  train %>%
+  filter(date >= "2020-03-15") %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(zip_deaths)) %>%
+  forecast(h = "6 months")
+
+foo <-
+  forecast %>%
+  index_by(date) %>%
+  summarize(fc_deaths = sum(.mean))
+
+bar <-
+  test %>%
+  as_tsibble(key = client, index = date) %>%
+  index_by(date) %>%
+  summarize(true_deaths = sum(zip_deaths))
+
+foo %>%
+  left_join(bar, by = "date") %>%
+  ggplot(aes(x = date)) + geom_line(aes(y = fc_deaths), color = "red") + geom_line(aes(y = true_deaths))
+```
+
+Common recipe for all models. 
+
+```{r}
+common_recipe <-
+  recipe(class ~ ., data = processed_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae, shrinkage, dep_var, ae, smoothed_deaths, date) %>%
+  step_zv(all_predictors()) %>%
+  # step_log(volume, POP) %>%
+  step_normalize(all_predictors())
+  
+```
+
+### Multiple models
+
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+log_spec <- 
+  logistic_reg(
+  mode = "classification",
+  engine = "glm")
+
+svm_lin_spec <-
+  svm_linear() %>%
+  set_engine("LiblineaR") %>%
+  set_mode("classification")
+
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+sln_spec <-
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
+  set_engine("keras", verbose=0) %>%
+  set_mode("classification")
+
+
+bt_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = 100)
+
+```
+
+```{r}
+#models <- list(log = log_spec,
+ #           forest = forest_spec,
+  #             neural = sln_spec,
+   #            svm_linear = svm_lin_spec,
+    #           boosted_trees = bt_spec,
+     #          knn = knn_spec)
+#recipes <- list(common_recipe)
+#wflows <- workflow_set(recipes, models)
+```
+
+```{r}
+#wflows %>% 
+ # mutate(fit_wflow = map(wflow_id, ~pull_workflow(.,.x)))
+
+```
+
+```{r}
+#trained_wflows_fit <- 
+  
+  #wflows %>% 
+ # fit(train)
+```
+
+```{r}
+bt_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(bt_spec)
+
+log_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(log_spec)
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(forest_spec)
+
+svm_lin_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(svm_lin_spec)
+
+knn_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(knn_spec)
+
+sln_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(sln_spec)
+```
+
+
+```{r}
+wflows <- tribble(~wflow ,
+                 # sln_wf,
+                  knn_wf, log_wf, forest_wf, bt_wf,# svm_lin_wf
+)
+ 
+
+
+wflows <-
+  wflows %>%
+  mutate(wflows_fit = map(wflow, ~ fit(.x, train)))
+
+wflows <-
+  wflows %>%
+  mutate(
+    class_predict = map(wflows_fit, ~ predict(.x, test)),
+    prob_predict = map(wflows_fit, ~ predict(.x, test, type = "prob")))
+
+wflows %>%
+  bind_cols(tribble(~id, "knn", "log", "forest", "bt")) %>%
+  select(-wflow, -wflows_fit) %>%
+  mutate(prob_predict = map(prob_predict, ~ bind_cols(.x, test %>% select(date, class)))) %>%
+  unnest(c(class_predict, prob_predict)) %>%
+  group_by(id, date) %>%
+  summarize(
+            sens = sens_vec(class, .pred_class),
+            spec = spec_vec(class, .pred_class),
+            roc_auc = roc_auc_vec(class, .pred_Adverse), .groups = "keep") %>%
+  pivot_longer(sens:roc_auc, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = id)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)
+
+```
+
+
+First, we forecast the deaths. 
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-zip_deaths) %>%
+  rename(zip_deaths = .mean)
+
+```
+
