@@ -1,10 +1,10 @@
 ```{r, setup, include=FALSE}
 knitr::opts_chunk$set(
       fig.path = "figures/report/fig-",
-      cache.path = "cache/report/"
-)
+      cache.path = "cache/report/")
+#Don't print warning and message in knit
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
 ```
-
 
 # Executive summary
 
@@ -386,10 +386,7 @@ We want to predict the `AE value` for each client for each week during COVID-19.
 Our main package is `Modeltime`, which consists time series models and machine learning. Since we have more than 500 clients, we have more than 500 time series. Practically, we will have more clients. We create a global machine learning model that forecasts all clients at once for computational efficiency. 
 
 We use data before Covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees) as our predictors. And we compare results with IHME death data/with zip death data/without death data. 
-```{r setup, include=FALSE} 
-#Don't print warning and message in knit
-knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
-```
+
 Necessary package we need. 
 ```{r}
 library(tidyverse)
@@ -762,7 +759,6 @@ predclaim2%>%
 1. To improve accuracy, we can add feature engineering and localized model selection by time series identifier.
 
 2. We can also choose the final predicted value according to the confident interval to improve our result since the exact AE is in the overlap of 5 models.
-
 
 We predict the shrunk AE on testing set. Our model will provide with predicting shrunk AE and confidence interval. 
 # Conclusion
