@@ -242,10 +242,142 @@ Variable | Description
 `shrunk_ae` | shrunk version of smoothed weekly AE (see TODO)
 `ae` | actual weekly AE
 `ihme_deaths` | IHME Covid death forecasts. **These are only available until Apr 4th 2021, and are set to 0 after this date.**
+`hes`, `hes_uns`, `str_hes` | percentage of the zip population that are vaccine hesitant, hesitant or unsure, and strongly hesistan respectively
+
+# Data exploration and motivation
+TODO: add the pictures we have in the intro of our presentations!
 
 # Long-term model
+Our first goal was to create a simple model to classify clients between high risk or low risk.
+In this first model, we determine client risk based on AE in 2020, and we will use data available before the pandemic as predictors.
 
-## Intro
+Our first task is to determine what "high risk" and "low risk" mean.
+To this extent, we define "AE 2020 > 3" as "high risk", as the 1st quantile of the AE 2020 is close to 3
+
+```r
+summary(yearly_data %>% pull(ae_2020))
+```
+
+```
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##   0.000   2.896   6.342  14.961  13.595 229.937
+```
+
+This threshold was used to create the column `adverse` in `yearly_data`.
+
+Thoughout this and following sections, we will be using extensively the `tidymodels` framework. We will explain the commands as they appear.
+
+```r
+library(tidymodels)
+```
+
+## Feature engineering
+Our mentor's hypothesis was that the AE for 2019 was not a good predictor for client risk during a pandemic.
+To test this hypothesis, we train and test a selection of models, some with 2019 AE as a preictor, and some without.
+
+We start with a recipe, which defines our model formulas and data preprocessing steps.
+We remove all categorical predictors and all variables that are not available before 2020.
+We also remove the correlated variable `actual_2019`.
+We then remove zero-variance predictors and normalize all predictors.
+
+```r
+with2019 <-
+  recipe(adverse ~ ., data = yearly_data) %>%
+  step_rm(all_nominal_predictors()) %>%
+  step_rm(ae_2020, ae_2021, actual_2019, actual_2020, actual_2021) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors())
+
+no2019 <-
+  with2019 %>%
+  step_rm(ae_2019)
+```
+
+Next, we describe our models using `parsnip` model specifications.
+We will try 8 different models: logistic regression, penalized logistic regression (penalty value chosen by initial tuning), random forest, tuned random forest, single layer neural network, RBF support vector machine, polynomial support vector machine, and K nearest neighbors.
+
+```r
+log_spec <-
+  logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+tuned_log_spec <-
+  logistic_reg(penalty = 0.00118) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+sln_spec <-
+  mlp() %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+```
+
+In `tidymodels`, the combination of a recipe and a model specification is called a **workflow**.
+Training a workflow trains both the recipe (i.e. it will learn the scaling and translation parameters for the normalization step) and the underlying model.
+When a workflow is used to predict, the trained recipe will automatically be applied to a new set of data, and passed on to the trained model.
+We can also combine sets of models and recipes into a `workflowset`.
+This will allow us to easily train and test our models on the same dataset.
+
+We first split our clients into training and testing sets.
+
+```r
+set.seed(30308)
+init <- initial_split(yearly_data, strata = adverse)
+```
+
+All of our model selection, tuning, etc. will be done using 10-fold CV on the training set.
+
+```r
+set.seed(30308)
+crossval <- vfold_cv(training(init), strata = adverse)
+```
+
+Our workflowset will contain the 16 combinations of the 8 model specifications and 2 recipes.
+We train each one on the 10 cross-validation splits, and assess the results using the area under the ROC (`roc_auc`).
+(Sidenote: we use `xfun::cache_rds` to cache lengthy lines. The resulting `.rds` files can be downloaded from the data repository).
+
+```r
+models <- list(Logistic = log_spec,
+               `Penalized logistic` = tuned_log_spec,
+               `Random forest` = forest_spec,
+               `Tuned random forest` = tuned_forest_spec,
+               `Neural net` = sln_spec,
+               `RBF SVM` = svm_rbf_spec,
+               `Polynomial SVM` = svm_poly_spec,
+               `KNN` = knn_spec)
+recipes <- list("with2019ae" = with2019,
+                "no2019ae" = no2019)
+wflows <- workflow_set(recipes, models)
+fit_wflows <-
+    wflows %>%
+      workflow_map(fn = "fit_resamples",
+                   seed = 30332,
+                   resamples = crossval,
+                   control = control_resamples(save_pred = TRUE),
+                   metrics = metric_set(roc_auc, accuracy))
+```
+
+
+
 
 ## Methods
 
@@ -261,6 +393,14 @@ Variable | Description
 ## Results
 
 # Conclusion
+# Future Directions
+
+The models above perfumed tremendously well both long and short term. Even though the data used to build the models are from trusted sources as cited in the data wrangling section, the clients data is simulated due to privacy among others. Hence, the natural future step will be to test the models on real clients. We expect the models to perform as good as they did with the simulated clients. 
+
+Another direction that this project can head to is to consider infections as lagged predictor for deaths. In other words, many infectious diseases contributed to the total deaths, for example in some years the US rate of the Influenza infections varies and the Influenza infections effects the respective total deaths, see the CDC [link](https://www.cdc.gov/flu/about/burden/index.html).Note that
+high vaccinations have helped averted hospitalizations and deaths. See the CDC [report](https://www.cdc.gov/flu/about/burden-averted/2019-2020.htm). With this in mind models can be build to take into account the influenza infections and its vaccination rate. Influenza is very seasonal infection thus the forecast will of course be seasonal, but in building the future model other infectious disease can be taken into to account, be it seasonal or not.
+
+As noted above, a new model  is naturally expected to give even better outcomes by adding more pandemic related predictors. To be precise, let's consider the relationship between vaccination and cases rate given by the CDC, check the [link](https://covid.cdc.gov/covid-data-tracker/#vaccination-case-rate),as expected the higher the vaccination the lower the cases and eventually lower death rate. So we expect that with these new covid-19 parameter among others will give better deaths forcast and thus better short-term model.
 
 # Appendices
 
@@ -269,3 +409,4 @@ Variable | Description
 ## R scripts
 
 ## Rmd files
+
