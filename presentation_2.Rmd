@@ -1,0 +1,469 @@
+---
+title: "presentation_2"
+author: "Lei Yang"
+date: "7/31/2021"
+output: html_document
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+      fig.width = 5, fig.height = 5, dpi = 300, fig.path = "figures/pres-"
+)
+```
+
+
+# Presentation 2 script
+
+## Data loading
+No need to talk about this.
+Please download the latest version of `data/simulation_data/all_persons.feather` from Google Drive.
+```{r message = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(feather)
+library(magrittr)
+library(skimr)
+library(vip)
+library(ggbeeswarm)
+library(finetune)
+per <- read_feather("data/simulation_data/all_persons.feather")
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2021 = sum(FaceAmt[year == 2021], na.rm = TRUE),
+    ae_2021 = actual_2021 / (expected / 2),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+We now have our full dataset. Behold!
+```{r}
+skim(clients)
+```
+
+## How many were actually adverse?
+We count how many have AE > 1 in each year
+```{r}
+clients %>%
+  transmute(
+    `2019` = ae_2019 > 1,
+    `2020` = ae_2020 > 1,
+    `2021` = ae_2021 > 1) %>%
+  pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar() +
+  labs( x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse deaths")
+  # scale_fill_manual(values = c("yellow2", "deepskyblue"))
+```
+
+Changes in actual claims from 2019 to 2021. Here each point is a company. Note the y-axis is logarithmic!!!
+```{r}
+set.seed(92929292)
+clients %>%
+  select(expected, actual_2019, actual_2020, actual_2021) %>%
+  rename(actual_Expected = expected) %>%
+  pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
+  mutate(Year = str_sub(Year, 8)) %>%
+  filter(Claims > 0) %>%
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(size = 0.5, priority = "random") +
+  guides(color = "none") + labs(title = "Size of claims") +
+  scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
+```
+
+```{r}
+ggplot(clients) +
+  geom_density(aes(x = actual_2019), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
+  #geom_point(data=data, aes(x=client, y=expected), colour="deepskyblue")+
+  #geom_point(data=data, aes(x=client, y=actual2021), color="black") +
+ # scale_y_continuous(name="Actual vs Expected Claims in 2019")
+```
+```{r}
+ggplot(clients) +
+  geom_density(aes(x = actual_2020), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
+```
+```{r}
+ggplot(clients) +
+  geom_density(aes(x = actual_2021), fill = "deepskyblue", alpha = 0.5) +
+  geom_density(aes(x = expected), fill = "black", alpha = 0.5) +
+  scale_x_log10()
+```
+##Trying many models with and without 2019 AE as a predictor
+
+```{r}
+clients <-
+  clients %>%
+  select(
+         -ae_2020, -ae_2021, -actual_2020, -actual_2019, -actual_2021,
+         -hes, -hes_uns, -str_hes)
+with2019_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  update_role(zip3, client, new_role = "ID") %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors(), -all_nominal())
+no2019_rec <-
+  with2019_rec %>%
+  step_rm(ae_2019)
+log_spec <-
+  logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+tuned_log_spec <-
+  logistic_reg(penalty = 0.00118) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+sln_spec <-
+  mlp() %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+svm_poly_spec <-
+  svm_poly() %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+models <- list(log = log_spec,
+               logtuned = tuned_log_spec,
+               forest = forest_spec,
+               foresttuned = tuned_forest_spec,
+               neural = sln_spec,
+               svmrbf = svm_rbf_spec,
+               svmpoly = svm_poly_spec,
+               knnspec = knn_spec)
+recipes <- list("with2019ae" = with2019_rec,
+                "no2019ae" = no2019_rec)
+wflows <- workflow_set(recipes, models)
+```
+```{r}
+set.seed(30308)
+init <- initial_split(clients, strata = adverse)
+set.seed(30308)
+crossval <- vfold_cv(training(init), strata = adverse)
+```
+
+```{r mod_with_without_2019, collapse = TRUE, cache = TRUE}
+fit_wflows <-
+  wflows %>%
+  workflow_map(fn = "fit_resamples",
+               seed = 30332,
+               resamples = crossval,
+               control = control_resamples(save_pred = TRUE),
+               metrics = metric_set(roc_auc, sens, accuracy),
+               verbose = TRUE)
+fit_wflows %>%
+  collect_metrics() %>%
+  filter(.metric %in% c("roc_auc", "accuracy")) %>%
+  separate(wflow_id, into = c("rec", "mod"), sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = rec, y = mean, color = mod, group = mod)) +
+  geom_point() + geom_line() + facet_wrap(~ factor(.metric)) +
+  labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
+```
+
+
+
+
+
+## Trying many models with many tuning parameters
+
+```{r}
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+# Samara's models
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+# tune_svm_poly_spec <-
+#   svm_poly() %>%
+#   set_engine("kernlab") %>%
+#   set_mode("classification")
+tune_knn_spec <-
+  nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+models <- list(log = tune_log_spec,
+               forest = tune_forest_spec,
+               sln = tune_sln_spec,
+               svm = tune_svm_rbf_spec,
+               knn = tune_knn_spec)
+recipes <- list(no2019_rec)
+wflows <- workflow_set(recipes, models)
+```
+
+```{r tune_many_models, cache = TRUE, collapse = TRUE}
+# make a bigger grid!
+# or use something like finetune!
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282,
+               verbose = TRUE)
+```
+```{r fig.width = 8, fig.height = 4, dpi = 450}
+autoplot(results)
+```
+
+## Tuning a forest
+
+We don't need to normalize the predictors
+```{r collapse = TRUE}
+forest_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 654)
+forest_rec <-
+  recipe(adverse ~ ., data = clients) %>%
+  step_rm(ae_2019) %>%
+  update_role(client, zip3, new_role = "ID") %>%
+  step_zv(all_predictors())
+forest_wflow <-
+  workflow() %>%
+  add_model(forest_spec) %>%
+  add_recipe(no2019_rec)
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1, 20)))
+forest_grid <-
+  grid_regular(forest_params, levels = 10)
+```
+```{r tune_forest, cache = TRUE, collapse = TRUE}
+forest_tune <-
+  forest_wflow %>%
+  tune_grid(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc, accuracy),
+      control = control_grid(verbose = FALSE)
+  )
+```
+```{r dpi = 450}
+forest_tune %>%
+  show_best(metric = "roc_auc", n = 10)
+autoplot(forest_tune)
+```
+
+## These are our optimal parameters
+
+
+```{r}
+best_params <- list(mtry = 5, min_n = 6)
+```
+
+## Threshold the forest
+
+use library `probably`
+
+```{r fig.width = 7}
+forest_resamples <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  fit_resamples(
+      resamples = crossval,
+      control = control_resamples(save_pred = TRUE)
+  )
+forest_resamples %>%
+  select(.predictions) %>%
+  unnest(.predictions) %>%
+  roc_curve(adverse, `.pred_ae > 3`) %>%
+  autoplot()
+forest_resamples <-
+  forest_resamples %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
+forest_resamples %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line() +
+  geom_vline(xintercept = 0.67, linetype = "dashed") +
+  labs(x = "Threshold", y = "Estimate", color = "Metric", title = "Sensitivity and specificity by threshold")
+```
+
+We select 0.67 as our final threshold
+```{r}
+my_threshold <- 0.67
+```
+
+
+## This is our final model !!!
+```{r}
+final_fit <-
+  forest_wflow %>%
+  finalize_workflow(best_params) %>%
+  last_fit(init)
+trained_wflow <-
+  final_fit %>%
+  extract_workflow()
+trained_recipe <-
+  trained_wflow %>%
+  extract_recipe(estimated = TRUE)
+```
+
+
+## Apply chosen threshold and compute metrics
+Use `probably` to apply threshold.
+Conf. matrix, accuracy, sens, spec, whatever you like
+
+```{r}
+final_fit %>%
+  collect_metrics()
+thresholded_predictions <-
+  final_fit %>%
+  collect_predictions() %>%
+  select(-.pred_class) %>%
+  mutate(class_pred =
+            make_two_class_pred(
+                  `.pred_ae > 3`,
+                  levels = levels(clients$adverse),
+                  threshold = my_threshold))
+confusion_matrix <-
+  thresholded_predictions %>%
+  conf_mat(adverse, class_pred)
+confusion_matrix %>%
+  autoplot(type = "heatmap")
+confusion_matrix %>% summary()
+```
+
+# SHAP value business
+```{r}
+fulltest <- testing(init)
+fulltrain <- training(init)
+```
+```{r}
+fulltrain %>% slice (343)
+fulltest %>% slice(80)
+```
+
+Break-down profile of New York
+```{r}
+library(DALEX)
+fit_parsnip <- trained_wflow %>% extract_fit_parsnip
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+ex %>%
+  predict_parts(train %>% slice(343)) %>%
+  plot()
+fit_parsnip %>% predict(train %>% slice(343), type = "prob")
+```
+
+Break-down profile of NC
+```{r}
+ex %>%
+  predict_parts(test %>% slice(80)) %>%
+  plot()
+fit_parsnip %>% predict(test %>% slice(80), type = "prob")
+```
+
+# FOr first one 
+Shap new york
+```{r shapNY, cache = TRUE}
+shap <- predict_parts(explainer = ex,
+                      new_observation = train %>% slice(343),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+
+Shap NC
+```{r shapNC, cache = TRUE}
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "shap",
+                                  B = 100)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+
+```{r fig.width = 10, dpi = 400}
+trained_wflow %>%
+  extract_fit_engine() %>%
+  importance() %>%
+  as_tibble_row() %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Importance") %>%
+  slice_max(Importance, n = 10) %>%
+  ggplot(aes(y = fct_reorder(factor(Variable), Importance), x = Importance, fill = fct_reorder(factor(Variable), Importance))) +
+  geom_col() +
+  scale_fill_brewer(palette = "Spectral") +
+  guides(fill = "none") + labs(y = "Variable", x = "Importance")
+```
