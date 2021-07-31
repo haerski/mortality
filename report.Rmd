@@ -520,55 +520,11 @@ $$
 Predicted\ \ Smoothed \ \ AE = Predicted\ \  Shrunk\ \ AE / Shrinkage,\\
 Predicted\ \ weekly\ \ Claim = Predicted\ \ Smoothed \ \ AE * (Expected\ \ Yearly\ \  Claim /52.18 )
 $$
+Read the predicted claim result
 ```{r}
-claim <- read_feather("data/processed_data_20_12_23.feather")%>%
-  select(date, client, claims, expected, shrinkage,volume)
-```
-```{r}
-predclaim<-result %>%
-  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
-  rename(model = .model_id, value = .value, date= .index)%>%
-  relocate(model, value, .after = client)%>%
-  pivot_wider(names_from = model, values_from =value)%>%
-  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
-  drop_na()%>%
- inner_join(claim, by = c("date", "client"))%>%
-  mutate(rf = rf/shrinkage *(expected /52.18),
-         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
-         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
-         knn = knn/shrinkage*(expected /52.18),
-         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
-  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
-
-predclaim1<-result1 %>%
-  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
-  rename(model = .model_id, value = .value, date= .index)%>%
-  relocate(model, value, .after = client)%>%
-  pivot_wider(names_from = model, values_from =value)%>%
-  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
-  drop_na()%>%
- inner_join(claim, by = c("date", "client"))%>%
-  mutate(rf = rf/shrinkage *(expected /52.18),
-         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
-         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
-         knn = knn/shrinkage*(expected /52.18),
-         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
-  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
-
-predclaim2<-result2 %>%
-  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
-  rename(model = .model_id, value = .value, date= .index)%>%
-  relocate(model, value, .after = client)%>%
-  pivot_wider(names_from = model, values_from =value)%>%
-  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
-  drop_na()%>%
- inner_join(claim, by = c("date", "client"))%>%
-  mutate(rf = rf/shrinkage *(expected /52.18),
-         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
-         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
-         knn = knn/shrinkage*(expected /52.18),
-         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
-  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+predclaim <- readRDS("predclaimwithIHME.rds")
+predclaim1 <- readRDS("predclaimwithzipdeath.rds")
+predclaim2 <- readRDS("predclaimwithoutdeath.rds")
 ```
 Weekly total claims vs predicted claims
 
