@@ -20,12 +20,6 @@ election <- read_csv("countypres_2000-2020.csv") %>%
   filter(year == 2020)
 ```
 
-Read data (county name)
-```{r}
-lifeexpect <- read_csv("U.S._Life_Expectancy_at_Birth_by_State_and_Census_Tract_-_2010-2015.csv")
-```
-
-
 rename
 ```{r}
 population <- population %>%
