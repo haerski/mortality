@@ -73,7 +73,8 @@ How many clients are adverse each week?
 weekly_data %>%
   group_by(date) %>%
   summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
-  ggplot(aes(x = date, y = prop_adverse)) + geom_line()
+  ggplot(aes(x = date, y = prop_adverse)) + geom_line() +
+  labs(y = "Proportion of clients w/ adverse mortality", x = "Date")
 ```
 # "Baseline" stuff
 Can maybe also copy paste some things from pres 2.
@@ -205,7 +206,7 @@ sln_wf <-
 ```
 
 
-```{r}
+```{r cache = TRUE}
 wflows <- tribble(~wflow ,
                   sln_wf,
                   knn_wf, log_wf, forest_wf, bt_wf)
@@ -462,22 +463,52 @@ Look at results one by one
 tests <-
   tribble(
     ~id, ~set,
-    "known true", test_known_true,
-    "unknown true", test_unknown_true,
-    "known fore", test_known_fore,
-    "unkown fore", test_unknown_fore)
+    # "known true", test_known_true,
+    # "unknown true", test_unknown_true,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
 
 tests %>%
   mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
   unnest(set) %>%
   group_by(id, date) %>%
-  summarize(Accuracy = yardstick::accuracy_vec(class, .pred_class)) %>%
-  ggplot(aes(x = date, y = Accuracy, color = id)) + geom_line()
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line() +
+  labs(x = "Date", y = "Accuracy", color = "")
+```
+```{r fig.width = 5.5}
+tests <-
+  tribble(
+    ~id, ~set,
+    "Known clients, true deaths", test_known_true,
+    "Unknown clients, true deaths", test_unknown_true,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line(aes(linetype = str_detect(id, "true"))) +
+  labs(x = "Date", y = "Accuracy", color = "") + guides(linetype = "none")
 ```
 
 ### Explaining outcomes
 Use DALEX
-```{r}
+```{r fig.height = 5, fig.width = 5}
 library(DALEX)
 library(DALEXtra)
 
@@ -490,17 +521,21 @@ recipe <-
   extract_recipe(estimated = TRUE)
 
 exp <- explain(model, recipe %>% bake(train))
-
 test_obs <-
   test_unknown_fore %>%
   filter(date == end, client == 397)
 
 exp %>%
 predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
-  plot()
+  plot(digits = 2, max_features = 5, title = "Client 397")
 
-trained_wf %>%
-  predict(test_obs, type = "prob")
+test_obs <-
+  test_known_fore %>%
+  filter(date == end, client == 405)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 405")
 ```
 
 
