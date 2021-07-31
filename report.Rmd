@@ -135,6 +135,14 @@ Bad zipcodes
 ## Results
 
 # Conclusion
+# Future Directions
+
+The models above perfumed tremendously well both long and short term. Even though the data used to build the models are from trusted sources as cited in the data wrangling section, the clients data is simulated due to privacy among others. Hence, the natural future step will be to test the models on real clients. We expect the models to perform as good as they did with the simulated clients. 
+
+Another direction that this project can head to is to consider infections as lagged predictor for deaths. In other words, many infectious diseases contributed to the total deaths, for example in some years the US rate of the Influenza infections varies and the Influenza infections effects the respective total deaths, see the CDC [link](https://www.cdc.gov/flu/about/burden/index.html).Note that
+high vaccinations have helped averted hospitalizations and deaths. See the CDC [report](https://www.cdc.gov/flu/about/burden-averted/2019-2020.htm). With this in mind models can be build to take into account the influenza infections and its vaccination rate. Influenza is very seasonal infection thus the forecast will of course be seasonal, but in building the future model other infectious disease can be taken into to account, be it seasonal or not.
+
+As noted above, a new model  is naturally expected to give even better outcomes by adding more pandemic related predictors. To be precise, let's consider the relationship between vaccination and cases rate given by the CDC, check the [link](https://covid.cdc.gov/covid-data-tracker/#vaccination-case-rate),as expected the higher the vaccination the lower the cases and eventually lower death rate. So we expect that with these new covid-19 parameter among others will give better deaths forcast and thus better short-term model.
 
 # Appendices
 
@@ -143,3 +151,4 @@ Bad zipcodes
 ## R scripts
 
 ## Rmd files
+
