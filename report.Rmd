@@ -1,0 +1,79 @@
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+      fig.path = "figures/report/fig-"
+)
+```
+
+
+# Executive summary
+
+# Data wrangling
+
+In this section, we describe our data gathering and tidying process.
+We will be making extensive use of the `tidyverse` family of packages.
+A series of scripts are used to generate tibbles, which are then saved in a `*.feather` for fast loading.
+A full list of scripts can be viewed in the Appendix (TODO!!!)
+```{r message = FALSE}
+library(tidyverse)
+library(feather)
+```
+
+## Data sources
+
+### US Census bureau
+We used the US Census Bureau's API to obtain the 2019 estimates for population and density per county from the Census Bureau's Population Estimates Program (PEP).
+The `censusapi` package provides an R interface to the API.
+Using the API requires an API key, which can be obtained from [here](https://api.census.gov/data/key_signup.html).
+The following snippet fetches the data, and saves the tibble into a file called `pop_den.feather`.
+```{r eval = FALSE}
+library("censusapi")
+
+Sys.setenv(CENSUS_KEY = "YOUR_KEY_HERE")
+
+# date_code = 12 is an estimate for July 1, 2019
+# total population + density
+pop <- getCensus(
+                 name = "pep/population",
+                 vintage = 2019,
+                 region = "county:*",
+                 vars = c("POP", "DENSITY"),
+                 DATE_CODE = 12)
+pop <- tibble(pop) %>%
+  select(-DATE_CODE)
+write_feather(pop, "pop_den.feather")
+```
+
+
+
+## County to zip3
+
+## Weekly deaths
+
+## IHME (state to zip3)
+
+# Long-term model
+
+## Intro
+
+## Methods
+
+## Results
+
+
+# Short-term model
+
+## Intro
+
+## Methods
+
+## Results
+
+# Conclusion
+
+# Appendices
+
+## Data repository
+
+## R scripts
+
+## Rmd files
