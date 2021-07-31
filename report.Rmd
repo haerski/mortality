@@ -27,11 +27,11 @@ Filename | Source | Description
 ---------|--------|------------
 `covid_deaths_usafacts.csv` | [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/) | Cumulative weekly COVID-19 deaths by county
 `soa_base_2017.csv` | (Sent by Douglas Armstrong) | $q_x$ values by gender, age, industry
-`Population_Estimates.csv` | ??? | ???
+`Population_Estimates.csv` | USDA ERS | ???
 `COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | ??? | ???  
-`Education_Estimates.csv` | ??? | ???
-`Poverty_Estimates.csv` | ??? | ???
-`Unemployment_Estimates.csv` | ??? | ???
+`Education_Estimates.csv` | USDA ERS | ???
+`Poverty_Estimates.csv` | USDA ERS | ???
+`Unemployment_Estimates.csv` | USDA ERS | ???
 `Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv` | [CDC](https://catalog.data.gov/dataset/vaccine-hesitancy-for-covid-19-county-and-local-estimates) | Vaccine hesitancy estimates for COVID-19
 `countypres_2000-2020.csv` | [MIT Election Data + Science Lab](https://dataverse.harvard.edu/file.xhtml?fileId=4819117&version=9.0) | Election data by county (only 2020 used)
 `zcta_county_rel_10.txt` | [US Census Bureau](https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2010.html#par_textimage_674173622) | Zip code to county relationship file (2010)
