@@ -341,7 +341,7 @@ crossval <- vfold_cv(training(init), strata = adverse)
 Our workflowset will contain the 16 combinations of the 8 model specifications and 2 recipes.
 We train each one on the 10 cross-validation splits, and assess the results using the area under the ROC (`roc_auc`).
 (Sidenote: we use `xfun::cache_rds` to cache lengthy lines. The resulting `.rds` files can be downloaded from the data repository).
-```{r longterm_feature_eng, cache = TRUE}
+```{r cache = TRUE}
 models <- list(Logistic = log_spec,
                `Penalized logistic` = tuned_log_spec,
                `Random forest` = forest_spec,
@@ -545,7 +545,6 @@ We want to predict the `AE value` for each client for each week during COVID-19.
 Our main package is `Modeltime`, which consists time series models and machine learning. Since we have more than 500 clients, we have more than 500 time series. Practically, we will have more clients. We create a global machine learning model that forecasts all clients at once for computational efficiency. 
 
 We use data before Covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees) as our predictors. And we compare results with IHME death data/with zip death data/without death data. 
-
 Necessary package we need. 
 ```{r}
 library(tidyverse)
