@@ -1,15 +1,12 @@
-```{r, setup, include=FALSE}
-knitr::opts_chunk$set(
-      fig.width = 5, fig.height = 5, dpi = 300, fig.path = "figures/final-"
-)
-```
+
 
 # FINAL PRESENTATION
 
 ## Data loading and boring stuff
 No need to talk about this.
 Please download the latest version of `data/processed_data_20_12_23.feather` from Google Drive.
-```{r message = FALSE}
+
+```r
 library(tidyverse)
 library(tidymodels)
 library(probably)
@@ -41,8 +38,13 @@ yearly_data <-
          -hes, -hes_uns, -str_hes, -ae, -dep_var, -shrinkage, -STATE_NAME, -ihme_deaths)
 ```
 
+```
+## Error in UseMethod("slice"): no applicable method for 'slice' applied to an object of class "c('grouped_df', 'tbl_df', 'tbl', 'data.frame')"
+```
+
 Make figure background transparent
-```{r}
+
+```r
 theme_update(plot.background = element_rect(fill = "transparent", colour = NA))
 ```
 
@@ -53,7 +55,8 @@ theme_update(plot.background = element_rect(fill = "transparent", colour = NA))
 AEs changing in 2019, 2020, copy paste from pres2
 
 We explain how we choose the threshold for adverse and not
-```{r}
+
+```r
 weekly_data %>%
   ungroup() %>%
   group_by(date) %>%
@@ -68,13 +71,18 @@ weekly_data %>%
   geom_hline(yintercept = 2.5, linetype = "dashed")
 ```
 
+![plot of chunk unnamed-chunk-3](figures/final-unnamed-chunk-3-1.png)
+
 How many clients are adverse each week?
-```{r}
+
+```r
 weekly_data %>%
   group_by(date) %>%
   summarize(prop_adverse = sum(class == "Adverse") / n()) %>%
   ggplot(aes(x = date, y = prop_adverse)) + geom_line()
 ```
+
+![plot of chunk unnamed-chunk-4](figures/final-unnamed-chunk-4-1.png)
 # "Baseline" stuff
 Can maybe also copy paste some things from pres 2.
 
@@ -90,7 +98,8 @@ This is trained on known COVID-19 data.
 
 ## Boring stuff 
 
-```{r}
+
+```r
 train <-
   weekly_data %>%
   filter(date <= "2021-01-01")
@@ -101,7 +110,8 @@ test <-
 ```
 
 
-```{r cache = TRUE}
+
+```r
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
@@ -110,7 +120,14 @@ forecast <-
   forecast(h = "6 months")
 ```
 
-```{r}
+```
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+```
+
+
+```r
 forecasted_test <-
   forecast %>%
   as_tibble() %>%
@@ -118,7 +135,6 @@ forecasted_test <-
   right_join(test, by = c("client", "date")) %>%
   select(-smoothed_deaths) %>%
   rename(smoothed_deaths = .mean)
-
 ```
 
 
@@ -129,7 +145,8 @@ Looking at performance every day for 3 months in the future.
 
 Creating a common recipe for all models. 
 
-```{r}
+
+```r
 common_recipe <-
   recipe(class ~ ., data = weekly_data) %>%
   step_rm(client, zip3, claims, smoothed_ae, shrunk_ae,  ae, zip_deaths, ihme_deaths, date) %>%
@@ -138,7 +155,8 @@ common_recipe <-
   step_normalize(all_predictors())
 ```
 
-```{r}
+
+```r
 forest_spec <-
   rand_forest(trees = 1000) %>%
   set_engine("ranger", num.threads = 8, seed = 123456789) %>%
@@ -172,7 +190,8 @@ bt_spec <- boost_tree(
 ```
 
 
-```{r}
+
+```r
 bt_wf <-
   workflow() %>%
   add_recipe(common_recipe) %>%
@@ -205,7 +224,8 @@ sln_wf <-
 ```
 
 
-```{r}
+
+```r
 wflows <- tribble(~wflow ,
                   sln_wf,
                   knn_wf, log_wf, forest_wf, bt_wf)
@@ -215,7 +235,46 @@ wflows <- tribble(~wflow ,
 wflows <-
   wflows %>%
   mutate(wflows_fit = map(wflow, ~ fit(.x, train))) 
+```
 
+```
+## Error: Problem with `mutate()` column `wflows_fit`.
+## ℹ `wflows_fit = map(wflow, ~fit(.x, train))`.
+## ✖ ValueError: numpy.ndarray size changed, may indicate binary incompatibility. Expected 88 from C header, got 80 from PyObject
+## 
+## Detailed traceback:
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/training.py", line 1133, in fit
+##     data_handler = data_adapter.get_data_handler(
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/data_adapter.py", line 1364, in get_data_handler
+##     return DataHandler(*args, **kwargs)
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/data_adapter.py", line 1152, in __init__
+##     adapter_cls = select_data_adapter(x, y)
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/data_adapter.py", line 988, in select_data_adapter
+##     adapter_cls = [cls for cls in ALL_ADAPTER_CLS if cls.can_handle(x, y)]
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/data_adapter.py", line 988, in <listcomp>
+##     adapter_cls = [cls for cls in ALL_ADAPTER_CLS if cls.can_handle(x, y)]
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/data_adapter.py", line 227, in can_handle
+##     tensor_types = _get_tensor_types()
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/tensorflow/python/keras/engine/data_adapter.py", line 1635, in _get_tensor_types
+##     import pandas as pd  # pylint: disable=g-import-not-at-top
+##   File "/home/haerski/R/x86_64-pc-linux-gnu-library/4.1/reticulate/python/rpytools/loader.py", line 39, in _import_hook
+##     module = _import(
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/pandas/__init__.py", line 29, in <module>
+##     from pandas._libs import hashtable as _hashtable, lib as _lib, tslib as _tslib
+##   File "/home/haerski/R/x86_64-pc-linux-gnu-library/4.1/reticulate/python/rpytools/loader.py", line 39, in _import_hook
+##     module = _import(
+##   File "/home/haerski/miniconda3/envs/gurobi/lib/python3.8/site-packages/pandas/_libs/__init__.py", line 13, in <module>
+##     from pandas._libs.interval import Interval
+##   File "/home/haerski/R/x86_64-pc-linux-gnu-library/4.1/reticulate/python/rpytools/loader.py", line 39, in _import_hook
+##     module = _import(
+##   File "pandas/_libs/interval.pyx", line 1, in init pandas._libs.interval
+```
+
+```
+## Timing stopped at: 0.132 0.007 0.138
+```
+
+```r
 wflows <-
   wflows %>%
   mutate(
@@ -223,7 +282,14 @@ wflows <-
     prob_predict = map(wflows_fit, ~ predict(.x, forecasted_test, type = "prob")))
 ```
 
-```{r}
+```
+## Error: Problem with `mutate()` column `class_predict`.
+## ℹ `class_predict = map(wflows_fit, ~predict(.x, forecasted_test))`.
+## ✖ object 'wflows_fit' not found
+```
+
+
+```r
 wflows %>%
   bind_cols(tribble(~id, "sln", "knn", "log", "forest", "bt")) %>%
   select(-wflow, -wflows_fit) %>%
@@ -240,16 +306,28 @@ wflows %>%
   geom_point() +
   geom_line() +
   facet_wrap( ~ metric)
+```
 
 ```
-```{r}
+## Error: Can't subset columns that don't exist.
+## ✖ Column `wflows_fit` doesn't exist.
+```
+
+```r
 wflows_cheat <-
   wflows %>%
   mutate(
     class_predict = map(wflows_fit, ~ predict(.x, test)),  
     prob_predict = map(wflows_fit, ~ predict(.x, test, type = "prob")))
+```
 
+```
+## Error: Problem with `mutate()` column `class_predict`.
+## ℹ `class_predict = map(wflows_fit, ~predict(.x, test))`.
+## ✖ object 'wflows_fit' not found
+```
 
+```r
 wflows_cheat %>%
   bind_cols(tribble(~id, "sln", "knn", "log", "forest", "bt")) %>%
   select(-wflow, -wflows_fit) %>%
@@ -266,7 +344,10 @@ wflows_cheat %>%
   geom_point() +
   geom_line() +
   facet_wrap( ~ metric)
+```
 
+```
+## Error in list2(...): object 'wflows_cheat' not found
 ```
 
 
@@ -275,7 +356,8 @@ wflows_cheat %>%
 Testing on known clients and unknown clients.
 
 We first split our clients into testing and training.
-```{r}
+
+```r
 set.seed(1213)
 training_clients <-
   weekly_data %>%
@@ -297,21 +379,24 @@ The testing clients are "unknown"; they will represent brand new clients.
 ### Case study: Jan 2021
 
 We will also define a training and testing date. For training, we use every date before Jan 1st 2021, and we test on Jan 2nd - Apr 1st.
-```{r}
+
+```r
 start <- ceiling_date(ymd("2021-01-01"), unit = "week")
 end <- ceiling_date(ymd("2021-04-01"), unit = "week")
 ```
 
 Next we tune a boosted tree model to the training clients. For tuning purposes, we divide the training dates into analysis and assessment dates. The analysis dates will be all dated before Oct 1st, and assessment will be Jan 1st.
 
-```{r}
+
+```r
 analys <- ceiling_date(ymd("2020-10-01"), unit = "week")
 assess <- start
 ```
 
 To assess the performance of our model, we split the training clients into analysis and assessment.
 We could (should?) also do cross-validation.
-```{r}
+
+```r
 set.seed(123)
 ana_clients <-
   training_clients %>%
@@ -336,7 +421,8 @@ resmpl <- manual_rset(list(spl), c("foo"))
 ```
 
 We describe our model. We use XGBoost
-```{r}
+
+```r
 xgboost_recipe <-
   recipe(formula = class ~ ., data = weekly_data) %>%
   step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae) %>%
@@ -354,7 +440,8 @@ xgboost_workflow <-
 ```
 
 Now we tune! We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
-```{r cache = TRUE, collapse = TRUE}
+
+```r
 set.seed(98324)
 res_grd <-
   xgboost_workflow %>%
@@ -363,6 +450,56 @@ res_grd <-
     grid = 10,
     metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy),
     control = control_grid(verbose = TRUE))
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 1/10
+## ✓ foo: preprocessor 1/1, model 1/10
+## i foo: preprocessor 1/1, model 1/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 2/10
+## ✓ foo: preprocessor 1/1, model 2/10
+## i foo: preprocessor 1/1, model 2/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 3/10
+## ✓ foo: preprocessor 1/1, model 3/10
+## i foo: preprocessor 1/1, model 3/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 4/10
+## ✓ foo: preprocessor 1/1, model 4/10
+## i foo: preprocessor 1/1, model 4/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 5/10
+## ✓ foo: preprocessor 1/1, model 5/10
+## i foo: preprocessor 1/1, model 5/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 6/10
+## ✓ foo: preprocessor 1/1, model 6/10
+## i foo: preprocessor 1/1, model 6/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 7/10
+## ✓ foo: preprocessor 1/1, model 7/10
+## i foo: preprocessor 1/1, model 7/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 8/10
+## ✓ foo: preprocessor 1/1, model 8/10
+## i foo: preprocessor 1/1, model 8/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 9/10
+## ✓ foo: preprocessor 1/1, model 9/10
+## i foo: preprocessor 1/1, model 9/10 (predictions)
+## i foo: preprocessor 1/1
+## ✓ foo: preprocessor 1/1
+## i foo: preprocessor 1/1, model 10/10
+## ✓ foo: preprocessor 1/1, model 10/10
+## i foo: preprocessor 1/1, model 10/10 (predictions)
 
 res <-
   xgboost_workflow %>%
@@ -371,11 +508,49 @@ res <-
       iter = 20,
       initial = res_grd,
       metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+## Optimizing roc_auc
+## Initial best: 0.78996
+##  1 ◯ accept suboptimal  roc_auc=0.74385
+##  2 ◯ accept suboptimal  roc_auc=0.69237
+##  3 ◯ accept suboptimal  roc_auc=0.66214
+##  4 + better suboptimal  roc_auc=0.67367
+##  5 ◯ accept suboptimal  roc_auc=0.67188
+##  6 ─ discard suboptimal roc_auc=0.6647
+##  7 ◯ accept suboptimal  roc_auc=0.6583
+##  8 ✖ restart from best  roc_auc=0.66342
+##  9 ◯ accept suboptimal  roc_auc=0.76537
+## 10 ─ discard suboptimal roc_auc=0.74129
+## 11 ─ discard suboptimal roc_auc=0.71875
+## 12 ◯ accept suboptimal  roc_auc=0.74027
+## 13 ♥ new best           roc_auc=0.80328
+## 14 ─ discard suboptimal roc_auc=0.76383
+## 15 ─ discard suboptimal roc_auc=0.78151
+## 16 ─ discard suboptimal roc_auc=0.771
+## 17 ─ discard suboptimal roc_auc=0.76076
+## 18 ─ discard suboptimal roc_auc=0.78381
+## 19 ♥ new best           roc_auc=0.81916
+## 20 ─ discard suboptimal roc_auc=0.7687
 ```
 
 The best parameter values are
-```{r}
+
+```r
 res %>% show_best(metric = "roc_auc")
+```
+
+```
+## # A tibble: 5 × 10
+##   trees tree_depth learn_rate .metric .estimator  mean     n std_err
+##   <int>      <int>      <dbl> <chr>   <chr>      <dbl> <int>   <dbl>
+## 1  1939          2   0.00552  roc_auc binary     0.819     1      NA
+## 2  1807          4   0.00273  roc_auc binary     0.803     1      NA
+## 3  1701          7   0.000408 roc_auc binary     0.790     1      NA
+## 4  1703          5   0.000617 roc_auc binary     0.784     1      NA
+## 5  2000          5   0.000264 roc_auc binary     0.782     1      NA
+## # … with 2 more variables: .config <chr>, .iter <int>
+```
+
+```r
 best_parms <- res %>% select_best(metric = "roc_auc")
 
 best_parms <- tribble(
@@ -392,12 +567,14 @@ best_parms <- tribble(
 ```
 
 We apply these parameters to our workflow
-```{r}
+
+```r
 final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
 ```
 
 We now need to forecast 3 months worth of `smoothed_deaths`.
-```{r cache = TRUE}
+
+```r
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= start) %>%
@@ -406,7 +583,20 @@ forecast <-
   forecast(h = "4 months")
 ```
 
-```{r}
+```
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+```
+
+
+```r
 future <-
   forecast %>%
   as_tibble() %>%
@@ -421,14 +611,16 @@ forecast_data <-
 
 
 We define our training 
-```{r}
+
+```r
 train <-
   weekly_data %>%
   filter(client %in% training_clients & date <= start)
 ```
 
 We will have several version of the testing set. Some of them will be known or unknown, some will be forecasted and true.
-```{r}
+
+```r
 test_known_true <-
   weekly_data %>%
   filter(client %in% training_clients) %>%
@@ -451,14 +643,20 @@ test_unknown_fore <-
 ```
 
 Train the workflow
-```{r cache = TRUE}
+
+```r
 trained_wf <-
   final_wf %>%
   fit(train)
 ```
 
+```
+## [21:35:48] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+```
+
 Look at results one by one
-```{r}
+
+```r
 tests <-
   tribble(
     ~id, ~set,
@@ -475,9 +673,16 @@ tests %>%
   ggplot(aes(x = date, y = Accuracy, color = id)) + geom_line()
 ```
 
+```
+## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
+```
+
+![plot of chunk unnamed-chunk-27](figures/final-unnamed-chunk-27-1.png)
+
 ### Explaining outcomes
 Use DALEX
-```{r}
+
+```r
 library(DALEX)
 library(DALEXtra)
 
@@ -490,7 +695,27 @@ recipe <-
   extract_recipe(estimated = TRUE)
 
 exp <- explain(model, recipe %>% bake(train))
+```
 
+```
+## Preparation of a new explainer is initiated
+##   -> model label       :  model_fit  ( [33m default [39m )
+##   -> data              :  34317  rows  26  cols 
+##   -> data              :  tibble converted into a data.frame 
+##   -> target variable   :  not specified! ( [31m WARNING [39m )
+##   -> predict function  :  yhat.model_fit  will be used ( [33m default [39m )
+##   -> predicted values  :  No value for predict function target column. ( [33m default [39m )
+##   -> model_info        :  package parsnip , ver. 0.1.7 , task classification ( [33m default [39m ) 
+##   -> model_info        :  Model info detected classification task but 'y' is a NULL .  ( [31m WARNING [39m )
+##   -> model_info        :  By deafult classification tasks supports only numercical 'y' parameter. 
+##   -> model_info        :  Consider changing to numerical vector with 0 and 1 values.
+##   -> model_info        :  Otherwise I will not be able to calculate residuals or loss function.
+##   -> predicted values  :  the predict_function returns an error when executed ( [31m WARNING [39m ) 
+##   -> residual function :  difference between y and yhat ( [33m default [39m )
+##  [32m A new explainer has been created! [39m
+```
+
+```r
 test_obs <-
   test_unknown_fore %>%
   filter(date == end, client == 397)
@@ -498,9 +723,20 @@ test_obs <-
 exp %>%
 predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
   plot()
+```
 
+![plot of chunk unnamed-chunk-28](figures/final-unnamed-chunk-28-1.png)
+
+```r
 trained_wf %>%
   predict(test_obs, type = "prob")
+```
+
+```
+## # A tibble: 1 × 2
+##   .pred_Adverse `.pred_Not adverse`
+##           <dbl>               <dbl>
+## 1         0.614               0.386
 ```
 
 
@@ -541,7 +777,8 @@ Possible future improvement: 1. use confident interval to find a better predict 
 
 
 ## Common data
-```{r eval = FALSE}
+
+```r
 library(tidyverse)
 library(tidymodels)
 library(modeltime)
@@ -559,7 +796,8 @@ library(lubridate)
 
 
 Get weeklydata 
-```{r eval = FALSE}
+
+```r
 clients<-read_feather("data/processed_data_20_12_23.feather")%>%
   select(-ae_2021, -ae_2020, -ae_2019,
          -actual_2021, -actual_2020, -actual_2019, -adverse,
@@ -579,7 +817,8 @@ Data pre-processing: log(POP), log(volume),log(expected) and normalize all predi
 Split: Train set(2020-03-15 - 2020-12-27), Test set (2021-01-03- 2021-06-27).
 
 split
-```{r eval = FALSE}
+
+```r
   set.seed(1234)
   splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
   train = training(splits)
@@ -592,7 +831,8 @@ Outcome: predicting shrunk_ae, confident interval for each client every day.
 
 
 #recipe with ihme death data
-```{r eval = FALSE}
+
+```r
 rec_obj <-
     recipe(shrunk_ae ~ ., data = training(splits)) %>%
     #step_rm(year,month,day)%>%
@@ -605,11 +845,11 @@ rec_obj <-
     step_dummy(all_nominal_predictors(), one_hot = TRUE)%>%
      step_zv(all_predictors()) %>%
     step_normalize(all_predictors(), -all_nominal())
-
 ```
 
 #engine
-```{r eval = FALSE}
+
+```r
 forest_spec <-
   rand_forest(trees = 1000) %>%
   set_engine("ranger", num.threads = 8, seed = 123456789) %>%
@@ -639,7 +879,8 @@ xgboost_spec <-
 ```
 
 # workflow with ihme death data
-```{r cache= TRUE, eval = FALSE}
+
+```r
 wflw_rf <- workflow() %>%
     add_model(
         forest_spec
@@ -676,7 +917,8 @@ wflw_xgboost <- workflow() %>%
     fit(data = training(splits))  
 ```
 Create a Modeltime Table
-```{r cache = TRUE, eval = FALSE}
+
+```r
 model_tbl <- modeltime_table(
     wflw_rf,
     wflw_tunedrf,
@@ -687,23 +929,25 @@ model_tbl <- modeltime_table(
 ```
 
 #Calibrate by client
-```{r eval = FALSE}
+
+```r
 calib_tbl <- model_tbl %>%
     modeltime_calibrate(
       new_data = testing(splits), 
       id       = "client"
     )
-
 ```
 
 Measure Accuracy on validation data
-```{r eval = FALSE}
+
+```r
 #global error
 calib_tbl %>% 
     modeltime_accuracy(acc_by_id = FALSE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
 ```
-```{r eval = FALSE}
+
+```r
 #local error for each client
 calib_tbl %>% 
     modeltime_accuracy(acc_by_id = TRUE) %>% 
@@ -712,7 +956,8 @@ calib_tbl %>%
 validate the  Test Data
 conf_by_id : produce confidence interval estimates by an ID feature.
 #all results
-```{r cache=TRUE, eval = FALSE}
+
+```r
 result <- calib_tbl %>%
     modeltime_forecast(
         new_data    = testing(splits),
@@ -720,7 +965,8 @@ result <- calib_tbl %>%
         conf_by_id  = TRUE
     ) 
 ```
-```{r eval = FALSE}
+
+```r
 result %>%
     group_by(client) %>%
     filter(client == c( "1", "5", "7","10", "61","100"))%>%
@@ -751,11 +997,13 @@ Currently, we use the predicting shrunk_ae as predicting result for each model.
 Possible future improvement: 1. use confident interval to find a better predict shrunk_ae 
 2. combine different model's results to get final result. 3.Compared the result with weekly death into account, we can add predicted death data as one predictor.
 
-```{r eval = FALSE}
+
+```r
 threshold <- 2.5
 ```
 
-```{r eval = FALSE}
+
+```r
 predresult <- result %>%
   select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
   rename(model = .model_id, value = .value, date= .index)%>%
@@ -810,5 +1058,4 @@ conf%>%
 conf %>%
   pivot_longer(acc_rf:acc_xgboost, names_to = "metric", values_to = "value") %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
-
 ```
