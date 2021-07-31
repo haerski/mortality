@@ -264,7 +264,7 @@ library(tidymodels)
 
 ## Feature engineering
 Our mentor's hypothesis was that the AE for 2019 was not a good predictor for client risk during a pandemic.
-To test this hypothesis, we train and test a selection of models, some with 2019 AE as a preictor, and some without.
+To test this hypothesis, we train and test a selection of models, some with 2019 AE as a predictor, and some without.
 
 We start with a recipe, which defines our model formulas and data preprocessing steps.
 We remove all categorical predictors and all variables that are not available before 2020.
@@ -374,9 +374,168 @@ fit_wflows <-
 
 ## Intro
 
+Now that we have introduced the long-term model and presented its results, we can move to the next step: integrating the time factor. To do this, we will be using the weekly_data through all this section. 
+
+```{r}
+weekly_data
+```
+
 ## Methods
 
+We first start by dividing our timeline into training and testing sets: we take all the dates before January 1 2021 as our training set and all the dates from January 1 2021 to April 1 2021 as our test set (so 4 months later). Our goal is to try and use the data from our clients' performance before January 1 to predict their performance after this date. 
+
+```{r}
+train <-
+  weekly_data %>%
+  filter(date <= "2021-01-01")
+
+test <-
+  weekly_data %>%
+  filter(date > "2021-01-01" & date <= "2021-04-01")
+```
+
+That are two mains things that set this model apart from the long term model introduced in the first section. First, the AE is updated weekly as opposed to the long term model where the AE is taken yearly. Second, we are adding weekly deaths as one of the predictors in addition to the variables introduced in the long term model. Now, that we have a clear understanding of the predictors in the short term model, the question that arises is how we can use the weekly deaths in the testing time (since such information won't be available for us in the "future"). To solve this issue, we decided to forecast the deaths for this "future" period: so we will use the weekly deaths from March 2020 to January 2021 and forecast the weekly deaths 4 months later. To do so, we will use the fully defaulted ARIMA forecaster. 
+
+
+We will be using 
+```{r}
+library(fable)
+library(tsibble)
+```
+
+```{r cache = TRUE}
+forecast <-
+  weekly_data %>%
+  filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+We create a new set called "forecasted_test" out of our testing set where we replace "smoothed_deaths" by "forecasted_deaths".
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-smoothed_deaths) %>%
+  rename(smoothed_deaths = .mean)
+```
+
+Now, the awaited part! We are ready to introduce our modeling strategy! 
+
+We first start by introducing a common recipe that we will use for all our models. Our target variable is class, we use all the predictors in weekly_data except for client, zip3, claims, smoothed_ae, shrunk_ae, ae, zip_deaths, ihme_deaths and date. We normalize all predictors and we apply log to both Volume of the client and Population of the zip code.  
+```{r}
+common_recipe <-
+  recipe(class ~ ., data = weekly_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae,  ae, zip_deaths, ihme_deaths, date) %>%
+  step_zv(all_predictors()) %>%
+  step_log(volume, POP) %>%
+  step_normalize(all_predictors())
+```
+
+Now, that we have our recipe, we are ready to try out different models and report the results. Let us introduce the six models and then we will talk a little bit about each one of them. 
+
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+log_spec <- 
+  logistic_reg(
+  mode = "classification",
+  engine = "glm")
+
+svm_lin_spec <-
+  svm_linear() %>%
+  set_engine("LiblineaR") %>%
+  set_mode("classification")
+
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+sln_spec <-
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
+  set_engine("keras", verbose=0) %>%
+  set_mode("classification")
+
+
+bt_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = 100)
+```
+
+We use Random Forest (forest), Logistic Regression (log), SVM (linear kernel), Nearest Neighbor (knn), Neural Network with single layer (sln) and Boosted Trees (bt) respectively with the default setting. For the Random Forest, we consider 1000 trees and for the Boosted Trees, we take 100 trees. All of these models use different engines introduced in tidymodels, and they are all set to mode=classficiation. 
+
+We then create the workflow for the six models mentioned above with the recipe taken to be the "common recipe" and the model taken to be the ones introduced in the previous chunk. 
+
+```{r}
+bt_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(bt_spec)
+
+log_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(log_spec)
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(forest_spec)
+
+svm_lin_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(svm_lin_spec)
+
+knn_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(knn_spec)
+
+sln_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(sln_spec)
+```
+
+
+
 ## Results
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Model we tried and did not work
 In this section, we introduce the model we tried and did not work.
