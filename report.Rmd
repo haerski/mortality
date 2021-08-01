@@ -50,7 +50,7 @@ Filename | Source | Description
 `covid_deaths_usafacts.csv` | [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/) | Cumulative weekly COVID-19 deaths by county
 `soa_base_2017.csv` | (Sent by Douglas Armstrong) | $q_x$ values by gender, age, industry
 `Population_Estimates.csv` | USDA ERS | Population estimates of the U.S., states and counties, 2019
-`COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | ??? | ???  
+`COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | [CDC](https://catalog.data.gov/dataset/covid-19-vaccinations-in-the-united-statescounty-8204e) | Overall US COVID-19 Vaccine administration and vaccine equity data at county level
 `Education_Estimates.csv` | USDA ERS | Educational attainment for adults age 25 and older for the U.S., states and counties, 2015-19
 `Poverty_Estimates.csv` | USDA ERS | Poverty rates in the U.S., states and counties, 2019
 `Unemployment_Estimates.csv` | USDA ERS | Unemployment rates, 2019 and 2020; median househould income, 2019. States and counties
