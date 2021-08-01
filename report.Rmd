@@ -841,7 +841,7 @@ spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly
 resmpl <- manual_rset(list(spl), c("foo"))
 ```
 
-Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae.
+Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, a, ihme_deaths. 
 
 ```{r}
 xgboost_recipe <-
@@ -861,7 +861,11 @@ xgboost_workflow <-
 ```
 
 
-We tuned the model using the following hyperparameters: number of trees, tree depth and learning rate.   
+We tuned the model using the following hyperparameters: 
+trees: Number of trees contained in the ensemble. 
+tree depth: An integer for the maximum depth of the tree (i.e. number of splits). 
+learn_rate: A number for the rate at which the boosting algorithm adapts from iteration-to-iteration. 
+
 We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
 ```{r short_tune_xgboost, cache = TRUE, collapse = TRUE}
 set.seed(98324)
@@ -882,6 +886,177 @@ res <-
       metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
 ```
 
+```{r}
+res %>% show_best(metric = "roc_auc")
+best_parms <- res %>% select_best(metric = "roc_auc")
+```
+
+Those are three possible choices for the best hyperparameters based on the higher "roc_auc". 
+```{r}
+best_parms <- tribble(
+        ~trees, ~tree_depth, ~learn_rate,
+        517, 10, 0.001312986874346298)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          138, 6, 0.07662993111378884)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          1939,2,0.005523512626608967)
+```
+
+After storing these best hyperparameters, We apply them to our workflow and we obtain our final workflow. 
+```{r}
+final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
+```
+
+We now need to forecast 4 months worth of `smoothed_deaths` usig default setting of Arima forecaster. 
+```{r cache = TRUE}
+forecast <-
+  weekly_data %>%
+  filter(date >= "2020-03-15" & date <= start) %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+We create a new data called "forecast_data" where the actual deaths are replaced by the forecasted deaths. 
+So, now we have weekly_data that contains the "actual_deaths" and we have "forecasted_data" that contains the "forecasted_deaths" instead.
+
+```{r}
+future <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  rename(smoothed_deaths = .mean)
+
+forecast_data <-
+  weekly_data %>%
+  rows_update(future, by = c("date","client"))
+```
+
+Now that we have these two data sets available, we can easily define the "train" set to include all known client with dates prior to January 1 (training dates). 
+```{r}
+train <-
+  weekly_data %>%
+  filter(client %in% training_clients & date <= start)
+```
+
+For the purpose of comparison, we will have four types of testing sets:
+test_known_true: include all known clients with dates 4 months after January 1 (known clients + testing dates) using the actual deaths for this 4 months period. 
+test_unknown_true: include all unknown clients with dates 4 months after January 1 (unknown clients + testing dates) using the actual deaths for this 4 months period. 
+test_known_fore: include all known clients with dates 4 months after January 1 (known clients + testing dates ) using the forecasted deaths for this 4 months period. 
+test_unknown_fore: include all unknown clients with dates 4 months after January 1 (unknown clients + testing dates) using the forecasted deaths for this 4 months period.
+
+
+```{r}
+test_known_true <-
+  weekly_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_true <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_known_fore <-
+  forecast_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_fore <-
+  forecast_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+```
+
+We fit "train" in the final workflow. 
+```{r cache = TRUE}
+trained_wf <-
+  final_wf %>%
+  fit(train)
+```
+
+Now, we can create a tribble "tests" out of these 4 testing sets. First, we compare the accuracy for both known clients and unknown clients prediction for these 4 months using the forecasted deaths. 
+```{r}
+tests <-
+  tribble(
+    ~id, ~set,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line() +
+  labs(x = "Date", y = "Accuracy", color = "")
+```
+We then compare these two plots with the two we get when we replace forecasted deaths by actual deaths. We can see that the difference is not large and somehow our machine learning models have been able to have good performance with the forecasted deaths. 
+
+```{r fig.width = 5.5}
+tests <-
+  tribble(
+    ~id, ~set,
+    "Known clients, true deaths", test_known_true,
+    "Unknown clients, true deaths", test_unknown_true,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line(aes(linetype = str_detect(id, "true"))) +
+  labs(x = "Date", y = "Accuracy", color = "") + guides(linetype = "none")
+```
+
+### Explaining outcomes
+Use DALEX
+```{r fig.height = 5, fig.width = 5}
+library(DALEX)
+library(DALEXtra)
+
+model <-
+  trained_wf %>%
+  extract_fit_parsnip()
+
+recipe <-
+  trained_wf %>%
+  extract_recipe(estimated = TRUE)
+
+exp <- explain(model, recipe %>% bake(train))
+test_obs <-
+  test_unknown_fore %>%
+  filter(date == end, client == 397)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 397")
+
+test_obs <-
+  test_known_fore %>%
+  filter(date == end, client == 405)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 405")
+```
 
 
 
