@@ -2157,7 +2157,15 @@ predclaim2%>%
 1. To improve accuracy, we can add feature engineering and localized model selection by time series identifier.
 
 2. We can also choose the final predicted value according to the confident interval to improve our result since the exact AE is in the overlap of 5 models.
+
 # Conclusion
+
+The aim of this project is to predict Group Life Insurance Mortality during a pandemic. We first observe that it is not sufficient to use the pre-pandemic AE to classify clients between low-risk and high-risk during a pandemic. Hence, we need to provide the management team with new information that helps their decision making in such unprecedented times. To serve this purpose, we collect data from the zip codes where the companies are located along with some characteristics of the companies. We present two types of models that serve valuable but different purposes: long term model and short term model. 
+After evaluating several metrics of different machine learning models for the long term version, we choose the Random Forest and we tune its hyperparameters. We aim at minimizing the proportion of adverse clients that are incorrectly predicted as not adverse since this number causes huge money loss for Securian. We also aim at minimizing the proportion of not adverse clients that are predicted as adverse, since this causes clients loss and hence again money loss. After choosing the best parameters, and choosing a threshold, we are able to reach a sensitivity of 85%, a specificity of 78% and an accuracy of 82%. We then use the SHAP values to increase the transparency of the model and understand the contribution of the predictors in the classification of our clients. 
+We then include the time factor in the short term model and we aim at using some known clients' performance in the past to predict unknown clients performance in the future. For this version, we use the rolling AE (updated weekly) as opposed to using yearly AE in the long term version. We also add the weekly deaths by covid to the list of predictors used in the long term model. One key step in the process is forecasting the weekly deaths to use it in the future. For this time-dependency version, we choose the Boosted Trees model after comparing its performance with other known machine learning models. After tuning it and choosing the best parameters, we present the accuracy of the predictions for unknown clients and compare it with the one for the known clients. 
+Using this work, the management team has a strong valuable asset that can be used in their contract renewals, their negotiations and their risk management. 
+
+
 # Future Directions
 
 The models above perfumed tremendously well both long and short term. Even though the data used to build the models are from trusted sources as cited in the data wrangling section, the clients data is simulated due to privacy among others. Hence, the natural future step will be to test the models on real clients. We expect the models to perform as good as they did with the simulated clients. 
