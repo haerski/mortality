@@ -17,6 +17,7 @@ A full list of scripts can be viewed in the Appendix (TODO!!!)
 ```{r message = FALSE}
 library(tidyverse)
 library(feather)
+library(lubridate)
 ```
 
 ## Data sources
@@ -865,15 +866,16 @@ start <- ceiling_date(ymd("2021-01-01"), unit = "week")
 end <- ceiling_date(ymd("2021-04-01"), unit = "week")
 ```
 
-The goal of the following is to tune the Boosted Trees and to make the best possible model! 
-To do so, we divide the training dates into analysis dates (all dates before October 1) and assessment dates (all dates before January 1). 
+The goal of the following is to tune the Boosted Trees to optimize predictions of "unknown" client three months out.
+To do so, we divide the training dates into analysis dates (all dates before October 1 2020) and assessment date (week of Jan 1st 2021). 
 
 ```{r}
 analys <- ceiling_date(ymd("2020-10-01"), unit = "week")
 assess <- start
 ```
 
-We then split the training clients into analysis (75% of the training or known clients) and assessment (25% of the known clients). 
+We then split the training clients into analysis (75% of the training or known clients) and assessment (25% of the known clients).
+We will create an `rsample` object, which requires knowledge of the row indices for the analysis and assessment sets.
 
 ```{r}
 set.seed(123)
@@ -885,7 +887,8 @@ ana_idx <-
   weekly_data %>%
   rownames_to_column() %>%
   filter(client %in% ana_clients & date <= analys) %>%
-  pull(rowname) %>% as.integer()
+  pull(rowname) %>%
+  as.integer()
 
 ass_idx <-
   weekly_data %>%
@@ -899,12 +902,12 @@ spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly
 resmpl <- manual_rset(list(spl), c("foo"))
 ```
 
-Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, a, ihme_deaths. 
+Now, we define our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae.
 
 ```{r}
 xgboost_recipe <-
   recipe(formula = class ~ ., data = weekly_data) %>%
-  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, ihme_deaths) %>%
+  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae) %>%
   step_zv(all_predictors())
 
 xgboost_spec <-
@@ -923,8 +926,16 @@ We tuned the model using the following hyperparameters:
 trees: Number of trees contained in the ensemble. 
 tree depth: An integer for the maximum depth of the tree (i.e. number of splits). 
 learn_rate: A number for the rate at which the boosting algorithm adapts from iteration-to-iteration. 
-
+We start with 10 different sets of parameters, and then finetune it using 20 iterations of simulated annealing.
 We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
+```{r echo = FALSE}
+# Masked function
+accuracy <- yardstick::accuracy
+```
+
+```{r}
+library(finetune)
+```
 ```{r short_tune_xgboost, cache = TRUE, collapse = TRUE}
 set.seed(98324)
 res_grd <-
@@ -932,7 +943,7 @@ res_grd <-
   tune_grid(
     resamples = resmpl,
     grid = 10,
-    metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy),
+    metrics = metric_set(roc_auc, sens, spec, j_index, accuracy),
     control = control_grid(verbose = TRUE))
 
 res <-
@@ -941,7 +952,7 @@ res <-
       resamples = resmpl,
       iter = 20,
       initial = res_grd,
-      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+      metrics = metric_set(roc_auc, sens, spec, j_index, accuracy))
 ```
 
 ```{r}
@@ -970,7 +981,7 @@ final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
 ```
 
 We now need to forecast 4 months worth of `smoothed_deaths` usig default setting of Arima forecaster. 
-```{r cache = TRUE}
+```{r forecast_smoothed, cache = TRUE}
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= start) %>%
@@ -1030,7 +1041,7 @@ test_unknown_fore <-
 ```
 
 We fit "train" in the final workflow. 
-```{r cache = TRUE}
+```{r train_xgboost, cache = TRUE}
 trained_wf <-
   final_wf %>%
   fit(train)
@@ -1086,7 +1097,7 @@ tests %>%
 
 ### Explaining outcomes
 Use DALEX
-```{r fig.height = 5, fig.width = 5}
+```{r}
 library(DALEX)
 library(DALEXtra)
 
@@ -1143,24 +1154,14 @@ Our main package is `Modeltime`, which consists time series models and machine l
 We use data before Covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees) as our predictors. And we compare results with IHME death data/with zip death data/without death data. 
 Necessary package we need. 
 ```{r}
-# library(tidyverse)
-# library(tidymodels)
-# library(modeltime)
-# library(timetk)
-# library(probably)
-# library(themis)
-# library(feather)
-# library(magrittr)
-# library(skimr)
-# library(vip)
-# library(dplyr)
-# library(lubridate)
+library(modeltime)
+library(timetk)
 ```
 *Read data and pre-processing*
 
 Get weeklydata from `2020-03-15` to `2021-06-27 `. 
 ```{r}
-clients<-read_feather("mortality/data/processed_data_20_12_23.feather")%>%
+clients<-read_feather("data/processed_data_20_12_23.feather")%>%
   select(-ae_2021, -ae_2020, -ae_2019,
          -actual_2021, -actual_2020, -actual_2019, -adverse,
          -STATE_NAME, -dep_var, -smoothed_ae)%>%
@@ -1182,7 +1183,7 @@ For extreme big number such as `population`, `volume` and `expected`, we use `st
 ` step_mutate(client = droplevels(client))` to add ID variable. `step_timeseries_signature()` to creates a a specification of a recipe step that will convert date into many features that can aid in machine learning with time-series data.
 
 Here `rec_obj` is for model with `ihme_deaths`, `rec_obj1` with `zip_deaths` and `rec_obj2` without any death data.
-```{r cache=TRUE}
+```{r}
 rec_obj_alldata <-
     recipe(shrunk_ae ~ ., data = training(splits)) %>%
     step_rm(zip3)%>%
@@ -1382,7 +1383,7 @@ saveRDS(model_tbl1, "modelwithzipdeath.rds")
 saveRDS(model_tbl2, "modelwithoutdeath.rds")
 ```
 Read the saved workflow table
-```{r}
+```{r eval = FALSE}
 model_tbl <- readRDS("modelwithIHME.rds")
 model_tbl1 <- readRDS("modelwithzipdeath.rds")
 model_tbl2 <- readRDS("modelwithoutdeath.rds")
@@ -1390,7 +1391,7 @@ model_tbl2 <- readRDS("modelwithoutdeath.rds")
 *Preparation for forecasting*
 Calibrate the model to testing set. It will calculate accuracy and forecast confidence by computing predictions and residuals for testing set.
 ```{r eval = FALSE}
-#with HIME
+#with IHME
 calib_tbl <- model_tbl %>%
     modeltime_calibrate(
       new_data = testing(splits), 
@@ -1441,59 +1442,61 @@ The accuracy metrics include:
 
 Global error
 ```{r eval = TRUE}
-#with HIME death
+#with IHME death
 calib_tbl %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = FALSE)
 #with zip death
 calib_tbl1 %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = FALSE)
 #without death data
 calib_tbl2 %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = FALSE)
 ```
 Local error for each client
-```{r, eval = FALSE}
-#with HIME death
+```{r, eval = TRUE, warning = FALSE}
+#with IHME death
 calib_tbl %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = TRUE)
 #with zip death
 calib_tbl1 %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = TRUE)
 #without death data
-calib_tbl1 %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+calib_tbl2 %>% 
+    modeltime_accuracy(acc_by_id = TRUE)
 ```
+
+```{r echo = FALSE}
+# not needed anymore
+rm(calib_tbl)
+rm(calib_tbl1)
+rm(calib_tbl2)
+```
+
 *Predict*
 
 We predict the shrunk AE on testing set. Our model will provide with predicting shrunk AE and confidence interval.  
 ```{r eval = FALSE}
-#with HIME death
+#with IHME death
 result <- calib_tbl %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
-    ) 
+    )
 #with zip death
 result1 <- calib_tbl1 %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
-    ) 
+    )
 #without death
 result2 <- calib_tbl2 %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
-    ) 
+    )
 ```
 For quick knit, we save the results on testing set here.
 ```{r eval = FALSE}
@@ -1513,39 +1516,42 @@ result2 <- readRDS("resultwithoutdeath.rds")
 *Visualize clients forecast*
 
 We pick client `1`, `5`, `7`, `10`, `61`, `100` as examples. We add the solid line `threshold = 2.5` to help us to see whether this client meet adverse mortality event.The exact AE is in the range of confidence interval. 
-```{r, fig.width=12, fig.height= 12}
+```{r, fig.width=12, fig.height= 12, warning = FALSE}
 result %>%
     group_by(client) %>%
-    filter(client == c(  "7","10", "61","100"))%>%
+    filter(client %in% c("7","10", "61","100"))%>%
     plot_modeltime_forecast(
         .facet_ncol  = 2,
         .interactive = FALSE,
-        .title = "Forecast Plot with HIME death ",
+        .title = "Forecast Plot with IHME death ",
         .line_alpha = 0.6,
         .line_size = 1,
-        .y_intercept = 2.5
+        .y_intercept = 2.5,
+        .conf_interval_show = FALSE
     )
 result1 %>%
     group_by(client) %>%
-    filter(client == c(  "7","10", "61","100"))%>%
+    filter(client %in% c(  "7","10", "61","100"))%>%
     plot_modeltime_forecast(
         .facet_ncol  = 2,
         .interactive = FALSE,
         .title = "Forecast Plot with zip death ",
         .line_alpha = 0.6,
         .line_size = 1,
-        .y_intercept = 2.5
+        .y_intercept = 2.5,
+        .conf_interval_show = FALSE
     )
 result2 %>%
     group_by(client) %>%
-    filter(client == c(  "7","10", "61","100"))%>%
+    filter(client %in% c(  "7","10", "61","100"))%>%
     plot_modeltime_forecast(
         .facet_ncol  = 2,
         .interactive = FALSE,
         .title = "Forecast Plot with zip death ",
         .line_alpha = 0.6,
         .line_size = 1,
-        .y_intercept = 2.5
+        .y_intercept = 2.5,
+        .conf_interval_show = FALSE
     )
 ```
 *Plot sens, spec, accuracy*
@@ -1638,8 +1644,11 @@ result2 %>%
 We calculate the predicted weekly claim by:
 
 $$
-Predicted\ \ Smoothed \ \ AE = Predicted\ \  Shrunk\ \ AE / Shrinkage,\\
-Predicted\ \ weekly\ \ Claim = Predicted\ \ Smoothed \ \ AE * (Expected\ \ Yearly\ \  Claim /52.18 )
+\text{Predicted Smoothed AE} = \text{Predicted Shrunk AE} / \text{Shrinkage},
+$$
+
+$$
+\text{Predicted weekly Claim} = \text{Predicted Smoothed AE} \cdot (\text{Expected Yearly Claim} /52.18 )
 $$
 ```{r}
 claim <- read_feather("data/processed_data_20_12_23.feather")%>%
@@ -1691,29 +1700,22 @@ predclaim2<-result2 %>%
          xgboost= xgboost/shrinkage*(expected / 52.18))%>%
   select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
 ```
-For quick knit, we save the results on testing set here.
-```{r eval = FALSE}
-#result with IHME death data 
-saveRDS(predclaim , "predclaimwithIHME.rds")
-#result with zip death data
-saveRDS(predclaim1, "predclaimwithzipdeath.rds")
-#result without death data
-saveRDS(predclaim2, "predclaimwithoutdeath.rds")
+
+```{r echo = FALSE}
+# Not needed anymore
+rm(result)
+rm(result1)
+rm(result2)
 ```
 
-Read the predicted claim result
-```{r}
-predclaim <- readRDS("predclaimwithIHME.rds")
-predclaim1 <- readRDS("predclaimwithzipdeath.rds")
-predclaim2 <- readRDS("predclaimwithoutdeath.rds")
-```
+
 Weekly total claims vs predicted claims
 
 We can draw the following conclusion: 
 
 1. K-nearest neighbors, Xgboost, svm can catch the trend for every week total claim.
 
-2. Death data improve the results greatly.The zip death have the best result since it is the exact death of the area. And HIME death data result is also good. Without death data, none of 5 models can catch the change of claims.
+2. Death data improve the results greatly.The zip death have the best result since it is the exact death of the area. And IHME death data result is also good. Without death data, none of 5 models can catch the change of claims.
 
 ```{r , fig.width=12}
 predclaim%>%
@@ -1762,9 +1764,9 @@ Half year total claims for each client vs predicted total claims
 
 Each client, the result is not good since it is a global model for all clients.
 
-```{r , fig.width=12}
+```{r , fig.width=12, warning = FALSE}
 predclaim%>%
-  filter(client == c(1:50))%>%
+  filter(client %in% c(1:50))%>%
   group_by(client)%>%
   summarise(expected = sum(expected)/52.18,
         claims = sum(claims),
@@ -1775,11 +1777,12 @@ predclaim%>%
          xgboost= sum(xgboost))%>%
   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
   pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggplot(aes(x = client, y = value, color = metric)) + geom_point(alpha = 0.7) +
+  scale_y_log10() +
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with IHME death")
 
 predclaim1%>%
-  filter(client == c(1:50))%>%
+  filter(client %in% c(1:50))%>%
   group_by(client)%>%
   summarise(expected = sum(expected)/52.18,
         claims = sum(claims),
@@ -1790,11 +1793,12 @@ predclaim1%>%
          xgboost= sum(xgboost))%>%
   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
   pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggplot(aes(x = client, y = value, color = metric)) + geom_point(alpha = 0.7)+
+  scale_y_log10() +
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with zip death")
 
 predclaim2%>%
-  filter(client == c(1:50))%>%
+  filter(client %in% c(1:50))%>%
   group_by(client)%>%
   summarise(expected = sum(expected)/52.18,
         claims = sum(claims),
@@ -1805,7 +1809,8 @@ predclaim2%>%
          xgboost= sum(xgboost))%>%
   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
   pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggplot(aes(x = client, y = value, color = metric)) + geom_point(alpha = 0.7)+
+  scale_y_log10() +
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client without death data")
 ```
 
