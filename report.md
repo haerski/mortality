@@ -12,6 +12,7 @@ A full list of scripts can be viewed in the Appendix (TODO!!!)
 ```r
 library(tidyverse)
 library(feather)
+library(lubridate)
 ```
 
 ## Data sources
@@ -637,25 +638,25 @@ weekly_data
 
 ```
 ## # A tibble: 58,056 × 35
-##    zip3  date       client claims zip_deaths smoothed_ae shrunk_ae class      
-##    <chr> <date>     <chr>   <dbl>      <dbl>       <dbl>     <dbl> <fct>      
-##  1 018   2019-03-31 1           0          0           0         0 Not adverse
-##  2 018   2019-04-07 1           0          0           0         0 Not adverse
-##  3 018   2019-04-14 1           0          0           0         0 Not adverse
-##  4 018   2019-04-21 1           0          0           0         0 Not adverse
-##  5 018   2019-04-28 1           0          0           0         0 Not adverse
-##  6 018   2019-05-05 1           0          0           0         0 Not adverse
-##  7 018   2019-05-12 1           0          0           0         0 Not adverse
-##  8 018   2019-05-19 1           0          0           0         0 Not adverse
-##  9 018   2019-05-26 1           0          0           0         0 Not adverse
-## 10 018   2019-06-02 1           0          0           0         0 Not adverse
+##    zip3  date       client claims zip_deaths smoothed_ae shrunk_ae class  
+##    <chr> <date>     <chr>   <dbl>      <dbl>       <dbl>     <dbl> <fct>  
+##  1 018   2019-03-31 1           0          0           0         0 Not ad…
+##  2 018   2019-04-07 1           0          0           0         0 Not ad…
+##  3 018   2019-04-14 1           0          0           0         0 Not ad…
+##  4 018   2019-04-21 1           0          0           0         0 Not ad…
+##  5 018   2019-04-28 1           0          0           0         0 Not ad…
+##  6 018   2019-05-05 1           0          0           0         0 Not ad…
+##  7 018   2019-05-12 1           0          0           0         0 Not ad…
+##  8 018   2019-05-19 1           0          0           0         0 Not ad…
+##  9 018   2019-05-26 1           0          0           0         0 Not ad…
+## 10 018   2019-06-02 1           0          0           0         0 Not ad…
 ## # … with 58,046 more rows, and 27 more variables: smoothed_deaths <dbl>,
-## #   size <int>, volume <dbl>, avg_qx <dbl>, avg_age <dbl>, per_male <dbl>,
-## #   per_blue_collar <dbl>, expected <dbl>, nohs <dbl>, hs <dbl>, college <dbl>,
-## #   bachelor <dbl>, R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>,
-## #   per_dem <dbl>, hes <dbl>, hes_uns <dbl>, str_hes <dbl>, svi <dbl>,
-## #   cvac <dbl>, income <dbl>, POP <dbl>, density <dbl>, ae <dbl>,
-## #   ihme_deaths <dbl>
+## #   size <int>, volume <dbl>, avg_qx <dbl>, avg_age <dbl>,
+## #   per_male <dbl>, per_blue_collar <dbl>, expected <dbl>, nohs <dbl>,
+## #   hs <dbl>, college <dbl>, bachelor <dbl>, R_birth <dbl>,
+## #   R_death <dbl>, unemp <dbl>, poverty <dbl>, per_dem <dbl>, hes <dbl>,
+## #   hes_uns <dbl>, str_hes <dbl>, svi <dbl>, cvac <dbl>, income <dbl>,
+## #   POP <dbl>, density <dbl>, ae <dbl>, ihme_deaths <dbl>
 ```
 
 ## Methods
@@ -814,7 +815,7 @@ wflows <-
 ```
 
 ```
-## [23:16:55] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [11:31:59] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 ```r
@@ -888,20 +889,6 @@ wflows_cheat %>%
 ![plot of chunk unnamed-chunk-33](figures/report/fig-unnamed-chunk-33-1.png)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Results
 
 Comparing the models above, we can see that the Boosted Trees is the best model. So, we use it for the rest of the project, we tune it, and we report the results. 
@@ -936,8 +923,8 @@ start <- ceiling_date(ymd("2021-01-01"), unit = "week")
 end <- ceiling_date(ymd("2021-04-01"), unit = "week")
 ```
 
-The goal of the following is to tune the Boosted Trees and to make the best possible model! 
-To do so, we divide the training dates into analysis dates (all dates before October 1) and assessment dates (all dates before January 1). 
+The goal of the following is to tune the Boosted Trees to optimize predictions of "unknown" client three months out.
+To do so, we divide the training dates into analysis dates (all dates before October 1 2020) and assessment date (week of Jan 1st 2021). 
 
 
 ```r
@@ -945,7 +932,8 @@ analys <- ceiling_date(ymd("2020-10-01"), unit = "week")
 assess <- start
 ```
 
-We then split the training clients into analysis (75% of the training or known clients) and assessment (25% of the known clients). 
+We then split the training clients into analysis (75% of the training or known clients) and assessment (25% of the known clients).
+We will create an `rsample` object, which requires knowledge of the row indices for the analysis and assessment sets.
 
 
 ```r
@@ -958,7 +946,8 @@ ana_idx <-
   weekly_data %>%
   rownames_to_column() %>%
   filter(client %in% ana_clients & date <= analys) %>%
-  pull(rowname) %>% as.integer()
+  pull(rowname) %>%
+  as.integer()
 
 ass_idx <-
   weekly_data %>%
@@ -972,7 +961,7 @@ spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly
 resmpl <- manual_rset(list(spl), c("foo"))
 ```
 
-Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae.
+Now, we define our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae.
 
 
 ```r
@@ -993,8 +982,18 @@ xgboost_workflow <-
 ```
 
 
-We tuned the model using the following hyperparameters: number of trees, tree depth and learning rate.  
+We tuned the model using the following hyperparameters: 
+trees: Number of trees contained in the ensemble. 
+tree depth: An integer for the maximum depth of the tree (i.e. number of splits). 
+learn_rate: A number for the rate at which the boosting algorithm adapts from iteration-to-iteration. 
+We start with 10 different sets of parameters, and then finetune it using 20 iterations of simulated annealing.
 We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
+
+
+
+```r
+library(finetune)
+```
 
 ```r
 set.seed(98324)
@@ -1003,7 +1002,7 @@ res_grd <-
   tune_grid(
     resamples = resmpl,
     grid = 10,
-    metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy),
+    metrics = metric_set(roc_auc, sens, spec, j_index, accuracy),
     control = control_grid(verbose = TRUE))
 ## i foo: preprocessor 1/1
 ## ✓ foo: preprocessor 1/1
@@ -1062,31 +1061,283 @@ res <-
       resamples = resmpl,
       iter = 20,
       initial = res_grd,
-      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+      metrics = metric_set(roc_auc, sens, spec, j_index, accuracy))
 ## Optimizing roc_auc
-## Initial best: 0.78996
-##  1 ◯ accept suboptimal  roc_auc=0.74385
-##  2 ◯ accept suboptimal  roc_auc=0.69237
-##  3 ◯ accept suboptimal  roc_auc=0.66214
-##  4 + better suboptimal  roc_auc=0.67367
-##  5 ◯ accept suboptimal  roc_auc=0.67188
-##  6 ─ discard suboptimal roc_auc=0.6647
-##  7 ◯ accept suboptimal  roc_auc=0.6583
-##  8 ✖ restart from best  roc_auc=0.66342
-##  9 ◯ accept suboptimal  roc_auc=0.76537
-## 10 ─ discard suboptimal roc_auc=0.74129
-## 11 ─ discard suboptimal roc_auc=0.71875
-## 12 ◯ accept suboptimal  roc_auc=0.74027
-## 13 ♥ new best           roc_auc=0.80328
-## 14 ─ discard suboptimal roc_auc=0.76383
-## 15 ─ discard suboptimal roc_auc=0.78151
-## 16 ─ discard suboptimal roc_auc=0.771
-## 17 ─ discard suboptimal roc_auc=0.76076
-## 18 ─ discard suboptimal roc_auc=0.78381
-## 19 ♥ new best           roc_auc=0.81916
-## 20 ─ discard suboptimal roc_auc=0.7687
+## Initial best: 0.78125
+##  1 ♥ new best           roc_auc=0.8061
+##  2 ─ discard suboptimal roc_auc=0.5707
+##  3 ◯ accept suboptimal  roc_auc=0.77357
+##  4 ─ discard suboptimal roc_auc=0.76691
+##  5 ◯ accept suboptimal  roc_auc=0.77357
+##  6 + better suboptimal  roc_auc=0.78714
+##  7 + better suboptimal  roc_auc=0.79047
+##  8 ◯ accept suboptimal  roc_auc=0.77408
+##  9 ✖ restart from best  roc_auc=0.7021
+## 10 ─ discard suboptimal roc_auc=0.64882
+## 11 ♥ new best           roc_auc=0.82659
+## 12 ─ discard suboptimal roc_auc=0.79867
+## 13 ◯ accept suboptimal  roc_auc=0.7897
+## 14 ◯ accept suboptimal  roc_auc=0.77408
+## 15 ─ discard suboptimal roc_auc=0.51921
+## 16 ─ discard suboptimal roc_auc=0.70261
+## 17 + better suboptimal  roc_auc=0.77766
+## 18 + better suboptimal  roc_auc=0.79201
+## 19 ✖ restart from best  roc_auc=0.77152
+## 20 ◯ accept suboptimal  roc_auc=0.81916
 ```
 
+
+```r
+res %>% show_best(metric = "roc_auc")
+```
+
+```
+## # A tibble: 5 × 10
+##   trees tree_depth learn_rate .metric .estimator  mean     n std_err
+##   <int>      <int>      <dbl> <chr>   <chr>      <dbl> <int>   <dbl>
+## 1  1006          3    0.00711 roc_auc binary     0.827     1      NA
+## 2  1006          2    0.0118  roc_auc binary     0.819     1      NA
+## 3   814          3    0.00379 roc_auc binary     0.806     1      NA
+## 4  1170          1    0.0510  roc_auc binary     0.799     1      NA
+## 5  1395          5    0.0133  roc_auc binary     0.792     1      NA
+## # … with 2 more variables: .config <chr>, .iter <int>
+```
+
+```r
+best_parms <- res %>% select_best(metric = "roc_auc")
+```
+
+Those are three possible choices for the best hyperparameters based on the higher "roc_auc". 
+
+```r
+best_parms <- tribble(
+        ~trees, ~tree_depth, ~learn_rate,
+        517, 10, 0.001312986874346298)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          138, 6, 0.07662993111378884)
+
+best_parms <- tribble(
+          ~trees, ~tree_depth, ~learn_rate,
+          1939,2,0.005523512626608967)
+```
+
+After storing these best hyperparameters, We apply them to our workflow and we obtain our final workflow. 
+
+```r
+final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
+```
+
+We now need to forecast 4 months worth of `smoothed_deaths` usig default setting of Arima forecaster. 
+
+```r
+forecast <-
+  weekly_data %>%
+  filter(date >= "2020-03-15" & date <= start) %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+```
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+```
+We create a new data called "forecast_data" where the actual deaths are replaced by the forecasted deaths. 
+So, now we have weekly_data that contains the "actual_deaths" and we have "forecasted_data" that contains the "forecasted_deaths" instead.
+
+
+```r
+future <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  rename(smoothed_deaths = .mean)
+
+forecast_data <-
+  weekly_data %>%
+  rows_update(future, by = c("date","client"))
+```
+
+Now that we have these two data sets available, we can easily define the "train" set to include all known client with dates prior to January 1 (training dates). 
+
+```r
+train <-
+  weekly_data %>%
+  filter(client %in% training_clients & date <= start)
+```
+
+For the purpose of comparison, we will have four types of testing sets:
+test_known_true: include all known clients with dates 4 months after January 1 (known clients + testing dates) using the actual deaths for this 4 months period. 
+test_unknown_true: include all unknown clients with dates 4 months after January 1 (unknown clients + testing dates) using the actual deaths for this 4 months period. 
+test_known_fore: include all known clients with dates 4 months after January 1 (known clients + testing dates ) using the forecasted deaths for this 4 months period. 
+test_unknown_fore: include all unknown clients with dates 4 months after January 1 (unknown clients + testing dates) using the forecasted deaths for this 4 months period.
+
+
+
+```r
+test_known_true <-
+  weekly_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_true <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_known_fore <-
+  forecast_data %>%
+  filter(client %in% training_clients) %>%
+  filter(date > start & date <= end)
+
+test_unknown_fore <-
+  forecast_data %>%
+  filter(!client %in% training_clients) %>%
+  filter(date > start & date <= end)
+```
+
+We fit "train" in the final workflow. 
+
+```r
+trained_wf <-
+  final_wf %>%
+  fit(train)
+```
+
+```
+## [11:41:34] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+```
+
+Now, we can create a tribble "tests" out of these 4 testing sets. First, we compare the accuracy for both known clients and unknown clients prediction for these 4 months using the forecasted deaths. 
+
+```r
+tests <-
+  tribble(
+    ~id, ~set,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line() +
+  labs(x = "Date", y = "Accuracy", color = "")
+```
+
+```
+## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
+```
+
+![plot of chunk unnamed-chunk-47](figures/report/fig-unnamed-chunk-47-1.png)
+We then compare these two plots with the two we get when we replace forecasted deaths by actual deaths. We can see that the difference is not large and somehow our machine learning models have been able to have good performance with the forecasted deaths. 
+
+
+```r
+tests <-
+  tribble(
+    ~id, ~set,
+    "Known clients, true deaths", test_known_true,
+    "Unknown clients, true deaths", test_unknown_true,
+    "Known clients", test_known_fore,
+    "Unknown clients", test_unknown_fore)
+
+tests %>%
+  mutate(set = map(set, ~ bind_cols(.x, trained_wf %>% predict(.x)))) %>%
+  unnest(set) %>%
+  group_by(id, date) %>%
+  summarize(
+      Accuracy = yardstick::accuracy_vec(class, .pred_class),
+      Sensitivity = yardstick::sens_vec(class, .pred_class),
+      Specificity = yardstick::spec_vec(class, .pred_class)) %>%
+  ungroup() %>%
+  pivot_longer(Accuracy:Specificity, names_to = "metric", values_to = "value") %>%
+  filter(metric == "Accuracy") %>%
+  ggplot(aes(x = date, y = value, color = id)) + geom_line(aes(linetype = str_detect(id, "true"))) +
+  labs(x = "Date", y = "Accuracy", color = "") + guides(linetype = "none")
+```
+
+```
+## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
+```
+
+![plot of chunk unnamed-chunk-48](figures/report/fig-unnamed-chunk-48-1.png)
+
+### Explaining outcomes
+Use DALEX
+
+```r
+library(DALEX)
+library(DALEXtra)
+
+model <-
+  trained_wf %>%
+  extract_fit_parsnip()
+
+recipe <-
+  trained_wf %>%
+  extract_recipe(estimated = TRUE)
+
+exp <- explain(model, recipe %>% bake(train))
+```
+
+```
+## Preparation of a new explainer is initiated
+##   -> model label       :  model_fit  ( [33m default [39m )
+##   -> data              :  34317  rows  26  cols 
+##   -> data              :  tibble converted into a data.frame 
+##   -> target variable   :  not specified! ( [31m WARNING [39m )
+##   -> predict function  :  yhat.model_fit  will be used ( [33m default [39m )
+##   -> predicted values  :  No value for predict function target column. ( [33m default [39m )
+##   -> model_info        :  package parsnip , ver. 0.1.7 , task classification ( [33m default [39m ) 
+##   -> model_info        :  Model info detected classification task but 'y' is a NULL .  ( [31m WARNING [39m )
+##   -> model_info        :  By deafult classification tasks supports only numercical 'y' parameter. 
+##   -> model_info        :  Consider changing to numerical vector with 0 and 1 values.
+##   -> model_info        :  Otherwise I will not be able to calculate residuals or loss function.
+##   -> predicted values  :  the predict_function returns an error when executed ( [31m WARNING [39m ) 
+##   -> residual function :  difference between y and yhat ( [33m default [39m )
+##  [32m A new explainer has been created! [39m
+```
+
+```r
+test_obs <-
+  test_unknown_fore %>%
+  filter(date == end, client == 397)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 397")
+```
+
+![plot of chunk unnamed-chunk-49](figures/report/fig-unnamed-chunk-49-1.png)
+
+```r
+test_obs <-
+  test_known_fore %>%
+  filter(date == end, client == 405)
+
+exp %>%
+predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 405")
+```
+
+![plot of chunk unnamed-chunk-49](figures/report/fig-unnamed-chunk-49-2.png)
 
 
 
@@ -1116,34 +1367,20 @@ We use data before Covid-19 (based on the zip code where the company is located 
 Necessary package we need. 
 
 ```r
-# library(tidyverse)
-# library(tidymodels)
-# library(modeltime)
-# library(timetk)
-# library(probably)
-# library(themis)
-# library(feather)
-# library(magrittr)
-# library(skimr)
-# library(vip)
-# library(dplyr)
-# library(lubridate)
+library(modeltime)
+library(timetk)
 ```
 *Read data and pre-processing*
 
 Get weeklydata from `2020-03-15` to `2021-06-27 `. 
 
 ```r
-clients<-read_feather("mortality/data/processed_data_20_12_23.feather")%>%
+clients<-read_feather("data/processed_data_20_12_23.feather")%>%
   select(-ae_2021, -ae_2020, -ae_2019,
          -actual_2021, -actual_2020, -actual_2019, -adverse,
          -STATE_NAME, -dep_var, -smoothed_ae)%>%
   filter(date >= "2020-03-15")%>%
   mutate(client = as.factor(client))
-```
-
-```
-## Error in normalizePath(path, mustWork = TRUE): path[1]="mortality/data/processed_data_20_12_23.feather": No such file or directory
 ```
 
 Split our data into two part: train set (`2020-03-15` to `2020-12-27`) and test set (`2021-01-03` to `2021-06-27`).
@@ -1381,47 +1618,14 @@ Read the saved workflow table
 
 ```r
 model_tbl <- readRDS("modelwithIHME.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file 'modelwithIHME.rds',
-## probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
 model_tbl1 <- readRDS("modelwithzipdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'modelwithzipdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
 model_tbl2 <- readRDS("modelwithoutdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'modelwithoutdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
 ```
 *Preparation for forecasting*
 Calibrate the model to testing set. It will calculate accuracy and forecast confidence by computing predictions and residuals for testing set.
 
 ```r
-#with HIME
+#with IHME
 calib_tbl <- model_tbl %>%
     modeltime_calibrate(
       new_data = testing(splits), 
@@ -1454,41 +1658,8 @@ Read the saved calibration sets.
 
 ```r
 calib_tbl <- readRDS("calibwithIHME.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file 'calibwithIHME.rds',
-## probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
 calib_tbl1 <- readRDS("calibwithzipdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'calibwithzipdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
 calib_tbl2 <- readRDS("calibwithoutdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'calibwithoutdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
 ```
 Here present the accuacy results. We can check the global error and local error for each cliente on testing set for different models.
 The accuracy metrics include:
@@ -1508,79 +1679,154 @@ The accuracy metrics include:
 Global error
 
 ```r
-#with HIME death
+#with IHME death
 calib_tbl %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = FALSE)
 ```
 
 ```
-## Error in c(".type", ".calibration_data") %in% names(object): object 'calib_tbl' not found
+## # A tibble: 5 × 9
+##   .model_id .model_desc .type   mae  mape  mase smape  rmse    rsq
+##       <int> <chr>       <chr> <dbl> <dbl> <dbl> <dbl> <dbl>  <dbl>
+## 1         1 RANGER      Test  12.1    Inf 1.51   89.6  31.7 0.114 
+## 2         2 RANGER      Test  10.5    Inf 1.31   88.7  20.7 0.179 
+## 3         3 KERNLAB     Test   7.41   Inf 0.925  95.1  12.4 0.466 
+## 4         4 KKNN        Test  12.4    NaN 1.55  NaN    39.4 0.0762
+## 5         5 XGBOOST     Test   7.13   Inf 0.891  85.9  15.3 0.545
 ```
 
 ```r
 #with zip death
 calib_tbl1 %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = FALSE)
 ```
 
 ```
-## Error in c(".type", ".calibration_data") %in% names(object): object 'calib_tbl1' not found
+## # A tibble: 5 × 9
+##   .model_id .model_desc .type   mae  mape  mase smape  rmse    rsq
+##       <int> <chr>       <chr> <dbl> <dbl> <dbl> <dbl> <dbl>  <dbl>
+## 1         1 RANGER      Test  12.9    Inf 1.61   90.3  32.2 0.130 
+## 2         2 RANGER      Test  10.9    Inf 1.37   88.3  21.5 0.185 
+## 3         3 KERNLAB     Test   6.76   Inf 0.844  90.2  11.9 0.510 
+## 4         4 KKNN        Test  12.4    NaN 1.55  NaN    39.0 0.0801
+## 5         5 XGBOOST     Test   6.81   Inf 0.850  91.0  15.5 0.314
 ```
 
 ```r
 #without death data
 calib_tbl2 %>% 
-    modeltime_accuracy(acc_by_id = FALSE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = FALSE)
 ```
 
 ```
-## Error in c(".type", ".calibration_data") %in% names(object): object 'calib_tbl2' not found
+## # A tibble: 5 × 9
+##   .model_id .model_desc .type   mae  mape  mase smape  rmse    rsq
+##       <int> <chr>       <chr> <dbl> <dbl> <dbl> <dbl> <dbl>  <dbl>
+## 1         1 RANGER      Test  10.5    Inf 1.31   86.0  31.2 0.112 
+## 2         2 RANGER      Test   9.25   Inf 1.15   85.2  20.7 0.162 
+## 3         3 KERNLAB     Test   6.37   Inf 0.795  91.5  11.9 0.513 
+## 4         4 KKNN        Test  13.4    NaN 1.67  NaN    43.1 0.0798
+## 5         5 XGBOOST     Test   6.30   Inf 0.787  81.5  12.5 0.450
 ```
 Local error for each client
 
 ```r
-#with HIME death
+#with IHME death
 calib_tbl %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = TRUE)
+```
+
+```
+## # A tibble: 2,460 × 10
+##    .model_id .model_desc .type client    mae  mape   mase smape   rmse
+##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>
+##  1         1 RANGER      Test  1        4.92 Inf    15.4  156.    5.30
+##  2         1 RANGER      Test  10      57.3  333.   17.4  108.   58.6 
+##  3         1 RANGER      Test  100      4.75  38.9   2.51  51.0   6.39
+##  4         1 RANGER      Test  101      4.30 191.    3.32  81.7   4.71
+##  5         1 RANGER      Test  102      2.46 Inf   Inf    200     2.50
+##  6         1 RANGER      Test  103      1.30 155.    1.51  64.8   1.75
+##  7         1 RANGER      Test  104    262.   Inf   125.   173.  310.  
+##  8         1 RANGER      Test  105     30.6  313.   16.4  109.   34.8 
+##  9         1 RANGER      Test  106     19.4   93.9   7.67  56.7  24.2 
+## 10         1 RANGER      Test  107      4.05  49.1   2.12  68.4   6.52
+## # … with 2,450 more rows, and 1 more variable: rsq <dbl>
+```
+
+```r
 #with zip death
 calib_tbl1 %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
-#without death data
-calib_tbl1 %>% 
-    modeltime_accuracy(acc_by_id = TRUE) %>% 
-    table_modeltime_accuracy(.interactive = FALSE)
+    modeltime_accuracy(acc_by_id = TRUE)
 ```
+
+```
+## # A tibble: 2,460 × 10
+##    .model_id .model_desc .type client    mae  mape   mase smape   rmse
+##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>
+##  1         1 RANGER      Test  1       11.5  Inf    36.1  175.   13.8 
+##  2         1 RANGER      Test  10      59.6  339.   18.1  110.   61.4 
+##  3         1 RANGER      Test  100      6.74  68.8   3.56  61.3   8.04
+##  4         1 RANGER      Test  101      5.63 219.    4.35  84.9   7.00
+##  5         1 RANGER      Test  102      2.12 Inf   Inf    200     2.16
+##  6         1 RANGER      Test  103      1.67 198.    1.94  70.5   2.30
+##  7         1 RANGER      Test  104    240.   Inf   115.   168.  294.  
+##  8         1 RANGER      Test  105     32.3  325.   17.3  113.   36.9 
+##  9         1 RANGER      Test  106     21.8  107.    8.62  64.3  26.8 
+## 10         1 RANGER      Test  107      3.98  49.0   2.09  68.3   6.44
+## # … with 2,450 more rows, and 1 more variable: rsq <dbl>
+```
+
+```r
+#without death data
+calib_tbl2 %>% 
+    modeltime_accuracy(acc_by_id = TRUE)
+```
+
+```
+## # A tibble: 2,460 × 10
+##    .model_id .model_desc .type client    mae  mape   mase smape   rmse
+##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>
+##  1         1 RANGER      Test  1        2.56 Inf     8.03 129.    2.79
+##  2         1 RANGER      Test  10      63.9  353.   19.4  114.   64.8 
+##  3         1 RANGER      Test  100      5.20  43.4   2.75  58.8   6.74
+##  4         1 RANGER      Test  101      4.01 148.    3.09  78.3   4.65
+##  5         1 RANGER      Test  102      3.04 Inf   Inf    200     3.10
+##  6         1 RANGER      Test  103      1.66 175.    1.92  77.5   2.28
+##  7         1 RANGER      Test  104    249.   Inf   119.   173.  294.  
+##  8         1 RANGER      Test  105     24.2  253.   13.0  102.   26.9 
+##  9         1 RANGER      Test  106     13.3   65.8   5.27  51.1  15.1 
+## 10         1 RANGER      Test  107      4.31  53.5   2.26  79.6   6.56
+## # … with 2,450 more rows, and 1 more variable: rsq <dbl>
+```
+
+
+
 *Predict*
 
 We predict the shrunk AE on testing set. Our model will provide with predicting shrunk AE and confidence interval.  
 
 ```r
-#with HIME death
+#with IHME death
 result <- calib_tbl %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
-    ) 
+    )
 #with zip death
 result1 <- calib_tbl1 %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
-    ) 
+    )
 #without death
 result2 <- calib_tbl2 %>%
     modeltime_forecast(
         new_data    = testing(splits),
         actual_data = bind_rows(training(splits), testing(splits)),
         conf_by_id  = TRUE
-    ) 
+    )
 ```
 For quick knit, we save the results on testing set here.
 
@@ -1596,41 +1842,8 @@ Read the results on testing set.
 
 ```r
 result <- readRDS("resultwithIHME.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file 'resultwithIHME.rds',
-## probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
 result1 <- readRDS("resultwithzipdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'resultwithzipdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
 result2 <- readRDS("resultwithoutdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'resultwithoutdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
 ```
 *Visualize clients forecast*
 
@@ -1639,56 +1852,53 @@ We pick client `1`, `5`, `7`, `10`, `61`, `100` as examples. We add the solid li
 ```r
 result %>%
     group_by(client) %>%
-    filter(client == c(  "7","10", "61","100"))%>%
+    filter(client %in% c("7","10", "61","100"))%>%
     plot_modeltime_forecast(
         .facet_ncol  = 2,
         .interactive = FALSE,
-        .title = "Forecast Plot with HIME death ",
+        .title = "Forecast Plot with IHME death ",
         .line_alpha = 0.6,
         .line_size = 1,
-        .y_intercept = 2.5
+        .y_intercept = 2.5,
+        .conf_interval_show = FALSE
     )
 ```
 
-```
-## Error in group_by(., client): object 'result' not found
-```
+![plot of chunk unnamed-chunk-69](figures/report/fig-unnamed-chunk-69-1.png)
 
 ```r
 result1 %>%
     group_by(client) %>%
-    filter(client == c(  "7","10", "61","100"))%>%
+    filter(client %in% c(  "7","10", "61","100"))%>%
     plot_modeltime_forecast(
         .facet_ncol  = 2,
         .interactive = FALSE,
         .title = "Forecast Plot with zip death ",
         .line_alpha = 0.6,
         .line_size = 1,
-        .y_intercept = 2.5
+        .y_intercept = 2.5,
+        .conf_interval_show = FALSE
     )
 ```
 
-```
-## Error in group_by(., client): object 'result1' not found
-```
+![plot of chunk unnamed-chunk-69](figures/report/fig-unnamed-chunk-69-2.png)
 
 ```r
 result2 %>%
     group_by(client) %>%
-    filter(client == c(  "7","10", "61","100"))%>%
+    filter(client %in% c(  "7","10", "61","100"))%>%
     plot_modeltime_forecast(
         .facet_ncol  = 2,
         .interactive = FALSE,
         .title = "Forecast Plot with zip death ",
         .line_alpha = 0.6,
         .line_size = 1,
-        .y_intercept = 2.5
+        .y_intercept = 2.5,
+        .conf_interval_show = FALSE
     )
 ```
 
-```
-## Error in group_by(., client): object 'result2' not found
-```
+![plot of chunk unnamed-chunk-69](figures/report/fig-unnamed-chunk-69-3.png)
 *Plot sens, spec, accuracy*
 
 Classify whether the client is adverse or not adverse: `shrunk_ae > 2.5`.
@@ -1731,9 +1941,7 @@ result %>%
   ggtitle("With IHME death data")
 ```
 
-```
-## Error in select(., -.model_desc, -.conf_lo, -.conf_hi, -.key): object 'result' not found
-```
+![plot of chunk unnamed-chunk-71](figures/report/fig-unnamed-chunk-71-1.png)
 
 ```r
 result1 %>%
@@ -1760,9 +1968,7 @@ result1 %>%
   ggtitle("With zip death data")
 ```
 
-```
-## Error in select(., -.model_desc, -.conf_lo, -.conf_hi, -.key): object 'result1' not found
-```
+![plot of chunk unnamed-chunk-71](figures/report/fig-unnamed-chunk-71-2.png)
 
 ```r
 result2 %>%
@@ -1789,16 +1995,17 @@ result2 %>%
   ggtitle("Without death data")
 ```
 
-```
-## Error in select(., -.model_desc, -.conf_lo, -.conf_hi, -.key): object 'result2' not found
-```
+![plot of chunk unnamed-chunk-71](figures/report/fig-unnamed-chunk-71-3.png)
 *Calculate predict claims*
 
 We calculate the predicted weekly claim by:
 
 $$
-Predicted\ \ Smoothed \ \ AE = Predicted\ \  Shrunk\ \ AE / Shrinkage,\\
-Predicted\ \ weekly\ \ Claim = Predicted\ \ Smoothed \ \ AE * (Expected\ \ Yearly\ \  Claim /52.18 )
+\text{Predicted Smoothed AE} = \text{Predicted Shrunk AE} / \text{Shrinkage},
+$$
+
+$$
+\text{Predicted weekly Claim} = \text{Predicted Smoothed AE} \cdot (\text{Expected Yearly Claim} /52.18 )
 $$
 
 ```r
@@ -1821,13 +2028,7 @@ predclaim<-result %>%
          knn = knn/shrinkage*(expected /52.18),
          xgboost= xgboost/shrinkage*(expected / 52.18))%>%
   select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
-```
 
-```
-## Error in select(., -.model_desc, -.conf_lo, -.conf_hi, -.key): object 'result' not found
-```
-
-```r
 predclaim1<-result1 %>%
   select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
   rename(model = .model_id, value = .value, date= .index)%>%
@@ -1842,13 +2043,7 @@ predclaim1<-result1 %>%
          knn = knn/shrinkage*(expected /52.18),
          xgboost= xgboost/shrinkage*(expected / 52.18))%>%
   select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
-```
 
-```
-## Error in select(., -.model_desc, -.conf_lo, -.conf_hi, -.key): object 'result1' not found
-```
-
-```r
 predclaim2<-result2 %>%
   select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
   rename(model = .model_id, value = .value, date= .index)%>%
@@ -1865,67 +2060,16 @@ predclaim2<-result2 %>%
   select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
 ```
 
-```
-## Error in select(., -.model_desc, -.conf_lo, -.conf_hi, -.key): object 'result2' not found
-```
-For quick knit, we save the results on testing set here.
 
-```r
-#result with IHME death data 
-saveRDS(predclaim , "predclaimwithIHME.rds")
-#result with zip death data
-saveRDS(predclaim1, "predclaimwithzipdeath.rds")
-#result without death data
-saveRDS(predclaim2, "predclaimwithoutdeath.rds")
-```
 
-Read the predicted claim result
 
-```r
-predclaim <- readRDS("predclaimwithIHME.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'predclaimwithIHME.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
-predclaim1 <- readRDS("predclaimwithzipdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'predclaimwithzipdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
-
-```r
-predclaim2 <- readRDS("predclaimwithoutdeath.rds")
-```
-
-```
-## Warning in gzfile(file, "rb"): cannot open compressed file
-## 'predclaimwithoutdeath.rds', probable reason 'No such file or directory'
-```
-
-```
-## Error in gzfile(file, "rb"): cannot open the connection
-```
 Weekly total claims vs predicted claims
 
 We can draw the following conclusion: 
 
 1. K-nearest neighbors, Xgboost, svm can catch the trend for every week total claim.
 
-2. Death data improve the results greatly.The zip death have the best result since it is the exact death of the area. And HIME death data result is also good. Without death data, none of 5 models can catch the change of claims.
+2. Death data improve the results greatly.The zip death have the best result since it is the exact death of the area. And IHME death data result is also good. Without death data, none of 5 models can catch the change of claims.
 
 
 ```r
@@ -1944,9 +2088,7 @@ predclaim%>%
   ggtitle(" Weekly total claim with IHME death")
 ```
 
-```
-## Error in group_by(., date): object 'predclaim' not found
-```
+![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-1.png)
 
 ```r
 predclaim1%>%
@@ -1964,9 +2106,7 @@ predclaim1%>%
   ggtitle(" Weekly total claim with zip death")
 ```
 
-```
-## Error in group_by(., date): object 'predclaim1' not found
-```
+![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-2.png)
 
 ```r
 predclaim2%>%
@@ -1984,9 +2124,7 @@ predclaim2%>%
   ggtitle(" Weekly total claim without death")
 ```
 
-```
-## Error in group_by(., date): object 'predclaim2' not found
-```
+![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-3.png)
 Half year total claims for each client vs predicted total claims
 
 Each client, the result is not good since it is a global model for all clients.
@@ -1994,7 +2132,7 @@ Each client, the result is not good since it is a global model for all clients.
 
 ```r
 predclaim%>%
-  filter(client == c(1:50))%>%
+  filter(client %in% c(1:50))%>%
   group_by(client)%>%
   summarise(expected = sum(expected)/52.18,
         claims = sum(claims),
@@ -2005,17 +2143,16 @@ predclaim%>%
          xgboost= sum(xgboost))%>%
   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
   pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggplot(aes(x = client, y = value, color = metric)) + geom_point(alpha = 0.7) +
+  scale_y_log10() +
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with IHME death")
 ```
 
-```
-## Error in filter(., client == c(1:50)): object 'predclaim' not found
-```
+![plot of chunk unnamed-chunk-76](figures/report/fig-unnamed-chunk-76-1.png)
 
 ```r
 predclaim1%>%
-  filter(client == c(1:50))%>%
+  filter(client %in% c(1:50))%>%
   group_by(client)%>%
   summarise(expected = sum(expected)/52.18,
         claims = sum(claims),
@@ -2026,17 +2163,16 @@ predclaim1%>%
          xgboost= sum(xgboost))%>%
   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
   pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggplot(aes(x = client, y = value, color = metric)) + geom_point(alpha = 0.7)+
+  scale_y_log10() +
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with zip death")
 ```
 
-```
-## Error in filter(., client == c(1:50)): object 'predclaim1' not found
-```
+![plot of chunk unnamed-chunk-76](figures/report/fig-unnamed-chunk-76-2.png)
 
 ```r
 predclaim2%>%
-  filter(client == c(1:50))%>%
+  filter(client %in% c(1:50))%>%
   group_by(client)%>%
   summarise(expected = sum(expected)/52.18,
         claims = sum(claims),
@@ -2047,13 +2183,12 @@ predclaim2%>%
          xgboost= sum(xgboost))%>%
   rename("Random forest" = rf, "Tuned random forest" = rf_tuned, "Support vector machines" = svm_rbd, "K-nearest neighbors" = knn, Xgboost = xgboost )%>%
   pivot_longer(claims:Xgboost, names_to = "metric", values_to = "value")%>%
-  ggplot(aes(x = client, y = log(value), color = metric)) + geom_point(alpha = 0.7)+
+  ggplot(aes(x = client, y = value, color = metric)) + geom_point(alpha = 0.7)+
+  scale_y_log10() +
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client without death data")
 ```
 
-```
-## Error in filter(., client == c(1:50)): object 'predclaim2' not found
-```
+![plot of chunk unnamed-chunk-76](figures/report/fig-unnamed-chunk-76-3.png)
 
 *Why this model doesn't work*
 
