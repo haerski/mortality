@@ -709,7 +709,7 @@ common_recipe <-
   step_normalize(all_predictors())
 ```
 
-Now, that we have our recipe, we are ready to try out different models and report the results. Let us introduce the six models and then we will talk a little bit about each one of them. 
+Now, that we have our recipe, we are ready to try out different models and report the results. Let us introduce the five models and then we will talk a little bit about each one of them. 
 
 ```{r}
 forest_spec <-
@@ -721,11 +721,6 @@ log_spec <-
   logistic_reg(
   mode = "classification",
   engine = "glm")
-
-svm_lin_spec <-
-  svm_linear() %>%
-  set_engine("LiblineaR") %>%
-  set_mode("classification")
 
 knn_spec <-
   nearest_neighbor() %>%
@@ -744,9 +739,9 @@ bt_spec <- boost_tree(
   trees = 100)
 ```
 
-We use Random Forest (forest), Logistic Regression (log), SVM (linear kernel), Nearest Neighbor (knn), Neural Network with single layer (sln) and Boosted Trees (bt) respectively with the default setting. For the Random Forest, we consider 1000 trees and for the Boosted Trees, we take 100 trees. All of these models use different engines introduced in tidymodels, and they are all set to mode=classficiation. 
+We use Random Forest (forest), Logistic Regression (log), Nearest Neighbor (knn), Neural Network with single layer (sln) and Boosted Trees (bt) respectively with the default setting. For the Random Forest, we consider 1000 trees and for the Boosted Trees, we take 100 trees. All of these models use different engines introduced in tidymodels, and they are all set to mode=classficiation. 
 
-We then create the workflow for the six models mentioned above with the recipe taken to be the "common recipe" and the model taken to be the ones introduced in the previous chunk. 
+We then create the workflow for the five models mentioned above with the recipe taken to be the "common recipe" and the model taken to be the ones introduced in the previous chunk. 
 
 ```{r}
 bt_wf <-
@@ -763,11 +758,6 @@ forest_wf <-
   workflow() %>%
   add_recipe(common_recipe) %>%
   add_model(forest_spec)
-
-svm_lin_wf <-
-  workflow() %>%
-  add_recipe(common_recipe) %>%
-  add_model(svm_lin_spec)
 
 knn_wf <-
   workflow() %>%
@@ -803,7 +793,7 @@ wflows <-
 Now that we have our prediction as a class and as a probability, we are ready to compare the metrics for the five models. 
 ```{r}
 wflows %>%
-  bind_cols(tribble(~id, "neural network", "nearest neigbor", "logistic regression", " Random Forest", "Boosted Trees")) %>%
+  bind_cols(tribble(~id, "Neural Network", "Nearest Neigbor", "Logistic Regression", " Random Forest", "Boosted Trees")) %>%
   select(-wflow, -wflows_fit) %>%
   mutate(prob_predict = map(prob_predict, ~ bind_cols(.x, test %>% select(date, class)))) %>%
   unnest(c(class_predict, prob_predict)) %>%
