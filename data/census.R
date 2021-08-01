@@ -2,7 +2,7 @@ library("tidyverse")
 library("censusapi")
 library("feather")
 
-Sys.setenv(CENSUS_KEY = "b54b0de8847ce154578b56060a1646a8591f7314")
+Sys.setenv(CENSUS_KEY = "YOUR KEY HERE")
 apis <- listCensusApis() %>% tibble()
 
 # population
