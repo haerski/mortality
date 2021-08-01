@@ -192,7 +192,8 @@ weekly_data <-
   read_feather("data/processed_data_20_12_23.feather") %>%
   select(-ae_2021, -ae_2020, -ae_2019,
          -actual_2021, -actual_2020, -actual_2019, -adverse,
-         -STATE_NAME, -shrinkage,  -dep_var) 
+         -STATE_NAME, -shrinkage,  -dep_var) %>%
+  arrange(client, date)
 
 yearly_data <-
   read_feather("data/processed_data_20_12_23.feather") %>%
