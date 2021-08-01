@@ -2,6 +2,26 @@
 
 # Executive summary
 
+As Babe Ruth once said: “Yesterday’s home runs don’t win today’s games!”
+
+In March 2020, with the pandemic starting,  the whole world fell into the “uncertainty” of the future. People all over the world are suffering enormously from its outcome but it is time to focus on healing and on preparing for the next normal. Similarly to other businesses, the insurance factor was affected by the COVID breakout as well and the whole business landscape needs to address the changes that came along.
+
+We are team Outliers from the Securian Financial Department of Data Science and we think we have the resources, the expertise and the determination to present the management team with a whole new set of information that can help their decision making during a pandemic. With Group Life Insurance being an important part for our company and for our American people, there is no doubt that we should look closely at how it is being affected by the recent events. For the past few weeks, we worked on a project that aims to predict Group Life mortality for our clients during a pandemic.
+
+One might ask how the pandemic is exactly affecting our group life insurance. As we know, Life Insurance guarantees payment of death benefits. Since the COVID 19 breakout, our clients are experiencing a higher mortality rate. This is resulting in an increase of the actual claims. Our primary function as actuaries and data scientists is to correctly forecast the mortality risk, and the way to do that is by first tracking the claims performance. With the Actual-to-Expected ratio AE being one of the most popular metrics to track claims performance, we classify clients as Low-Risk if their AE is less than 1  and High-Risk otherwise. Observing the large shift of the proportion of clients that are Adverse from 2019 to 2020, we claim that the historical AE of a client pre-pandemic is no longer a good predictor of the client’s performance during a pandemic.
+
+We aim at replacing this historical AE with a predictive one that can help our management and sales team have better insight on the possibility that a client experiences an Adverse mortality event during an outbreak. We collect data from the zip codes where the companies are located: poverty percentage, education level, unemployment rate, etc. We then combine this information with some characteristics of the companies such as average age of employees and some pandemic-related resources. We then apply several machine learning models, validate the results and build the best possible insight for proper risk-management.
+
+We provide our management team with two models: one is long-term and the other  is short-term. Each of these models serve different purposes and bring valuable assets to the company. 
+The long-term model can be used at a specific time and uses the information of some clients to predict what can happen to other clients in different zip codes. While working on this model, our goal was to minimize the loss of money for Securian that can be caused by a tragic event such as the pandemic. So, we aimed at minimizing the number of clients that were adverse and predicted otherwise. We also wanted to prevent the company from losing clients that will perform well, so we focused on minimizing the number of clients that are not adverse and predicted to be so. The strength of this model lies in understanding the contributions of different predictors in the performance of the clients. The management team can have better insight and clarity regarding how each predictor contributes positively or negatively into the classification. It is worthy to note that adding the AE2019 to the list of  predictors for this model won’t make any additional improvements. Hence our claim is proved. 
+As opposed to the long term model, the short term model integrates the time factor. Its importance lies in using the information and performance of some clients in the past and predicting how a completely new client is going to perform in the future!
+
+Having these two models in the disposition of the management team, they can gain accurate and deep understanding of old and new clients performance during a pandemic. They can use this enhanced understanding to determine contract renewals, to negotiate with clients and most importantly to better face the uncertainties of the future!
+
+
+
+
+
 # Data wrangling
 
 In this section, we describe our data gathering and tidying process.
@@ -25,7 +45,7 @@ Filename | Source | Description
 `covid_deaths_usafacts.csv` | [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/) | Cumulative weekly COVID-19 deaths by county
 `soa_base_2017.csv` | (Sent by Douglas Armstrong) | $q_x$ values by gender, age, industry
 `Population_Estimates.csv` | USDA ERS | Population estimates of the U.S., states and counties, 2019
-`COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | ??? | ???  
+`COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | [CDC](https://catalog.data.gov/dataset/covid-19-vaccinations-in-the-united-statescounty-8204e) | Overall US COVID-19 Vaccine administration and vaccine equity data at county level
 `Education_Estimates.csv` | USDA ERS | Educational attainment for adults age 25 and older for the U.S., states and counties, 2015-19
 `Poverty_Estimates.csv` | USDA ERS | Poverty rates in the U.S., states and counties, 2019
 `Unemployment_Estimates.csv` | USDA ERS | Unemployment rates, 2019 and 2020; median househould income, 2019. States and counties
@@ -780,7 +800,60 @@ We will be using
 
 ```r
 library(fable)
+```
+
+```
+## Loading required package: fabletools
+```
+
+```
+## 
+## Attaching package: 'fabletools'
+```
+
+```
+## The following object is masked _by_ '.GlobalEnv':
+## 
+##     accuracy
+```
+
+```
+## The following object is masked from 'package:yardstick':
+## 
+##     accuracy
+```
+
+```
+## The following object is masked from 'package:parsnip':
+## 
+##     null_model
+```
+
+```
+## The following object is masked from 'package:infer':
+## 
+##     generate
+```
+
+```r
 library(tsibble)
+```
+
+```
+## 
+## Attaching package: 'tsibble'
+```
+
+```
+## The following object is masked from 'package:lubridate':
+## 
+##     interval
+```
+
+```
+## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, union
 ```
 
 
@@ -914,7 +987,7 @@ wflows <-
 ```
 
 ```
-## [14:17:31] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [15:16:41] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 ```r
@@ -2316,8 +2389,14 @@ As noted above, a new model  is naturally expected to give even better outcomes 
 # Appendices
 
 ## Data repository
+The data is stored in [Google Drive](https://drive.google.com/drive/folders/1GYzZ3FuPWtQwTF8-UPQdenm0QWL_u_HH?usp=sharing).
+It contains all the files needed to generate the various datasets and compile the `Rmd` files.
+Some datasets have been pre-generated for convenience.
+The directory structure is meant to mimic the one in the [GitHub repository](https://github.com/haerski/mortality).
 
-## R scripts
+Next, we describe the contents and dependencies of the files in the data repository
+
+### R scripts
 
 `data/zip3_rel.R`: generates `data/zip3_rel.feather`. Depends on
 
@@ -2359,27 +2438,27 @@ As noted above, a new model  is naturally expected to give even better outcomes 
  * `data/zcta_county_rel_10.txt`
  * `data/2020_12_23/reference_hospitalization_all_locs.csv`
 
-## Rmd files
+### Rmd files
 
 `report.Rmd`: this file. Depends on
 
  * `data/processed_data_20_12_23.feather`, generated by `data/processed_data.r`
- * `calibwithIHME.rds`, Google Drive
- * `calibwithzipdeaths.rds`, Google Drive
- * `calibwithoutdeaths.rds`, Google Drive
- * `resultwithIHME.rds`, Google Drive
- * `resultwithzipdeaths.rds`, Google Drive
- * `resultwithoutdeaths.rds`, Google Drive
+ * `calibwithIHME.rds`
+ * `calibwithzipdeaths.rds`
+ * `calibwithoutdeaths.rds`
+ * `resultwithIHME.rds`
+ * `resultwithzipdeaths.rds`
+ * `resultwithoutdeaths.rds`
 
 `time.Rmd`: work on time-dependent models. Depends on
 
  * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
  * `data/data.feather`, generated by `data/wrangling.Rmd`
  * `data/deaths_zip3.feather`, generated by `data/deaths.R`
- * `data/state.txt`, Google Drive
- * `data/zcta_county_rel_10.txt`, Google Drive
- * `data/2020_12_23/reference_hospitalization_all_locs.csv`, Google Drive
- * `data/process.feather`, generated by TODO
+ * `data/state.txt`
+ * `data/zcta_county_rel_10.txt`
+ * `data/2020_12_23/reference_hospitalization_all_locs.csv`
+ * `data/processed_data_20_12_23.feather`, generated by `data/processed_data.r`
 
 `baseline_models.Rmd`: work on time-independent models. Depends on
 
@@ -2405,8 +2484,3 @@ As noted above, a new model  is naturally expected to give even better outcomes 
 
  * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
  * `data/data.feather`, generated by `data/wrangling.Rmd`
-
-`logistic_regression(monthly ae).Rmd`: ??? TODO! (delete?)
-
-`logistic_regression_attempt_1.Rmd`: ??? TODO! (delete?)
-
