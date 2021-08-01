@@ -269,7 +269,41 @@ Variable | Description
 `hes`, `hes_uns`, `str_hes` | percentage of the zip population that are vaccine hesitant, hesitant or unsure, and strongly hesistan respectively
 
 # Data exploration and motivation
-TODO: add the pictures we have in the intro of our presentations!
+Since the pandemic started, our client claims increased dramatically.
+In normal times, we expect an Actual-to-Expected ratio close to 1.
+As we can see below, this doesn't apply in times of pandemic.
+```{r}
+yearly_data %>%
+  ungroup() %>%
+  transmute(
+    `2019` = ae_2019 > 1,
+    `2020` = ae_2020 > 1,
+    `2021` = ae_2021 > 1) %>%
+  pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar() +
+  labs(x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse mortality")
+```
+
+We plot the magnitude of claims.
+Each dot corresponds to a client.
+We see that the expected claims look similar to the actual claims in 2019, while things change dramatically in 2020 and 2021.
+Note that the vertical axis is logarithmic!
+The change in the claims during a pandemic differs by orders of magnitude compared to the expected ones.
+```{r}
+library(ggbeeswarm)
+set.seed(92929292)
+yearly_data %>%
+  ungroup() %>%
+  select(expected, actual_2019, actual_2020, actual_2021) %>%
+  rename(actual_Expected = expected) %>%
+  pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
+  mutate(Year = str_sub(Year, 8)) %>%
+  filter(Claims > 0) %>%
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(size = 0.5, priority = "random") +
+  guides(color = "none") + labs(title = "Size of claims") +
+  scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
+```
 
 # Long-term model
 Our first goal was to create a simple model to classify clients between high risk or low risk.

@@ -4,22 +4,19 @@
 
 As Babe Ruth once said: “Yesterday’s home runs don’t win today’s games!”
 
-In March 2020, with the pandemic starting,  the whole world fell into the “uncertainty” of the future. People all over the world are suffering enormously from its outcome but it is time to focus on healing and on preparing for the next normal. Similarly to other businesses, the insurance factor was affected by the COVID breakout as well and the whole business landscape needs to address the changes that came along.
+In March 2020, with the pandemic starting,  the whole world fell into the “uncertainty” of the future. People all over the world are suffering enormously from its outcome but it is time to focus on healing and on preparing for the next normal. Similarly to other businesses, the insurance factor was affected by the COVID breakout as well and the whole business landscape needs to address the changes that came along. 
 
-We are team Outliers from the Securian Financial Department of Data Science and we think we have the resources, the expertise and the determination to present the management team with a whole new set of information that can help their decision making during a pandemic. With Group Life Insurance being an important part for our company and for our American people, there is no doubt that we should look closely at how it is being affected by the recent events. For the past few weeks, we worked on a project that aims to predict Group Life mortality for our clients during a pandemic.
+We are team Outliers from the Securian Financial Department of Data Science and we think we have the resources, the expertise and the determination to present the management team with a whole new set of information that can help their decision making during a pandemic. With Group Life Insurance being an important part for our company and for our American people, there is no doubt that we should look closely at how it is being affected by the recent events. For the past few weeks, we worked on a project that aims to predict Group Life mortality for our clients during a pandemic. 
 
 One might ask how the pandemic is exactly affecting our group life insurance. As we know, Life Insurance guarantees payment of death benefits. Since the COVID 19 breakout, our clients are experiencing a higher mortality rate. This is resulting in an increase of the actual claims. Our primary function as actuaries and data scientists is to correctly forecast the mortality risk, and the way to do that is by first tracking the claims performance. With the Actual-to-Expected ratio AE being one of the most popular metrics to track claims performance, we classify clients as Low-Risk if their AE is less than 1  and High-Risk otherwise. Observing the large shift of the proportion of clients that are Adverse from 2019 to 2020, we claim that the historical AE of a client pre-pandemic is no longer a good predictor of the client’s performance during a pandemic.
 
-We aim at replacing this historical AE with a predictive one that can help our management and sales team have better insight on the possibility that a client experiences an Adverse mortality event during an outbreak. We collect data from the zip codes where the companies are located: poverty percentage, education level, unemployment rate, etc. We then combine this information with some characteristics of the companies such as average age of employees and some pandemic-related resources. We then apply several machine learning models, validate the results and build the best possible insight for proper risk-management.
+We aim at replacing this historical AE with a predictive one that can help our management and sales team have better insight on the possibility that a client experiences an Adverse mortality event during an outbreak. We collect data from the zip codes where the companies are located: poverty percentage, education level, unemployment rate, etc. We then combine this information with some characteristics of the companies such as average age of employees and some pandemic-related resources. We then apply several machine learning models, validate the results and build the best possible insight for proper risk-management.  
 
 We provide our management team with two models: one is long-term and the other  is short-term. Each of these models serve different purposes and bring valuable assets to the company. 
 The long-term model can be used at a specific time and uses the information of some clients to predict what can happen to other clients in different zip codes. While working on this model, our goal was to minimize the loss of money for Securian that can be caused by a tragic event such as the pandemic. So, we aimed at minimizing the number of clients that were adverse and predicted otherwise. We also wanted to prevent the company from losing clients that will perform well, so we focused on minimizing the number of clients that are not adverse and predicted to be so. The strength of this model lies in understanding the contributions of different predictors in the performance of the clients. The management team can have better insight and clarity regarding how each predictor contributes positively or negatively into the classification. It is worthy to note that adding the AE2019 to the list of  predictors for this model won’t make any additional improvements. Hence our claim is proved. 
 As opposed to the long term model, the short term model integrates the time factor. Its importance lies in using the information and performance of some clients in the past and predicting how a completely new client is going to perform in the future!
 
-Having these two models in the disposition of the management team, they can gain accurate and deep understanding of old and new clients performance during a pandemic. They can use this enhanced understanding to determine contract renewals, to negotiate with clients and most importantly to better face the uncertainties of the future!
-
-
-
+Having these two models in the disposition of the management team, the latter can gain accurate and deep understanding of old and new clients performance during a pandemic. They can use this enhanced understanding to determine contract renewals, to negotiate with clients and most importantly to better face the uncertainties of the future! 
 
 
 # Data wrangling
@@ -270,7 +267,47 @@ Variable | Description
 `hes`, `hes_uns`, `str_hes` | percentage of the zip population that are vaccine hesitant, hesitant or unsure, and strongly hesistan respectively
 
 # Data exploration and motivation
-TODO: add the pictures we have in the intro of our presentations!
+Since the pandemic started, our client claims increased dramatically.
+In normal times, we expect an Actual-to-Expected ratio close to 1.
+As we can see below, this doesn't apply in times of pandemic.
+
+```r
+yearly_data %>%
+  ungroup() %>%
+  transmute(
+    `2019` = ae_2019 > 1,
+    `2020` = ae_2020 > 1,
+    `2021` = ae_2021 > 1) %>%
+  pivot_longer(`2019`:`2021`, names_to = "year", values_to = "adverse") %>%
+  mutate(adverse = fct_rev(fct_recode(factor(adverse), `AE > 1` = "TRUE", `AE < 1` = "FALSE"))) %>%
+  ggplot(aes(x = year, fill = adverse)) + geom_bar() +
+  labs(x = "Year", y = "Count", fill = "Class", title = "Number of clients experiencing adverse mortality")
+```
+
+![plot of chunk unnamed-chunk-9](figures/report/fig-unnamed-chunk-9-1.png)
+
+We plot the magnitude of claims.
+Each dot corresponds to a client.
+We see that the expected claims look similar to the actual claims in 2019, while things change dramatically in 2020 and 2021.
+Note that the vertical axis is logarithmic!
+The change in the claims during a pandemic differs by orders of magnitude compared to the expected ones.
+
+```r
+library(ggbeeswarm)
+set.seed(92929292)
+yearly_data %>%
+  ungroup() %>%
+  select(expected, actual_2019, actual_2020, actual_2021) %>%
+  rename(actual_Expected = expected) %>%
+  pivot_longer(everything(), names_to = "Year", values_to = "Claims") %>%
+  mutate(Year = str_sub(Year, 8)) %>%
+  filter(Claims > 0) %>%
+  ggplot(aes(Year, Claims, color = Year)) + scale_y_log10() + geom_beeswarm(size = 0.5, priority = "random") +
+  guides(color = "none") + labs(title = "Size of claims") +
+  scale_color_manual(values = c("yellow3", "deepskyblue", "black", "red"))
+```
+
+![plot of chunk unnamed-chunk-10](figures/report/fig-unnamed-chunk-10-1.png)
 
 # Long-term model
 Our first goal was to create a simple model to classify clients between high risk or low risk.
@@ -415,7 +452,7 @@ fit_wflows %>%
   labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
 ```
 
-![plot of chunk unnamed-chunk-16](figures/report/fig-unnamed-chunk-16-1.png)
+![plot of chunk unnamed-chunk-18](figures/report/fig-unnamed-chunk-18-1.png)
 
 The performance with 2019 AE as a predictor is equal or worse than not using it.
 Thus in the following we use the recipe where 2019 AE is removed.
@@ -478,7 +515,7 @@ We will thus choose it for further tuning.
 autoplot(results)
 ```
 
-![plot of chunk unnamed-chunk-18](figures/report/fig-unnamed-chunk-18-1.png)
+![plot of chunk unnamed-chunk-20](figures/report/fig-unnamed-chunk-20-1.png)
 
 ## Tuning a random forest
 Since we've chosen a random forest, we no longer need to normalize our predictors.
@@ -531,7 +568,7 @@ We choose a set of parameters whose `roc_auc` is high. In this case, we choose `
 autoplot(forest_tune)
 ```
 
-![plot of chunk unnamed-chunk-21](figures/report/fig-unnamed-chunk-21-1.png)
+![plot of chunk unnamed-chunk-23](figures/report/fig-unnamed-chunk-23-1.png)
 
 ```r
 best_params <- list(mtry = 5, min_n = 6)
@@ -554,7 +591,20 @@ These are averaged over the 10 crossvalidation sets.
 
 ```r
 library(probably)
+```
 
+```
+## 
+## Attaching package: 'probably'
+```
+
+```
+## The following objects are masked from 'package:base':
+## 
+##     as.factor, as.ordered
+```
+
+```r
 forest_resamples <-
   final_forest %>%
   finalize_workflow(best_params) %>%
@@ -585,7 +635,7 @@ forest_resamples %>%
 ## `summarise()` has grouped output by '.threshold'. You can override using the `.groups` argument.
 ```
 
-![plot of chunk unnamed-chunk-22](figures/report/fig-unnamed-chunk-22-1.png)
+![plot of chunk unnamed-chunk-24](figures/report/fig-unnamed-chunk-24-1.png)
 
 Some expertise and business intuition is required in order to determine the desired threshold value.
 Due to a lack of time and resources, we decided to choose a threshold value that would simultaneously optimize for sensitivity and specificity. To that extent, we choose the threshold value of 0.67.
@@ -619,7 +669,7 @@ confusion_matrix <-
 confusion_matrix %>% autoplot(type = "heatmap")
 ```
 
-![plot of chunk unnamed-chunk-24](figures/report/fig-unnamed-chunk-24-1.png)
+![plot of chunk unnamed-chunk-26](figures/report/fig-unnamed-chunk-26-1.png)
 
 ```r
 confusion_matrix %>% summary()
@@ -650,6 +700,27 @@ Load `DALEX` package for plot break_down and SHAP value plot.
 
 ```r
 library(DALEX)
+```
+
+```
+## Welcome to DALEX (version: 2.2.1).
+## Find examples and detailed introduction at: http://ema.drwhy.ai/
+## Additional features will be available after installation of: ggpubr.
+## Use 'install_dependencies()' to get all suggested dependencies
+```
+
+```
+## 
+## Attaching package: 'DALEX'
+```
+
+```
+## The following object is masked from 'package:dplyr':
+## 
+##     explain
+```
+
+```r
 fit_parsnip <- trained_forest %>% extract_fit_parsnip
 trained_recipe <- trained_forest %>% extract_recipe
 train <- trained_recipe %>% bake(training(init))
@@ -688,7 +759,7 @@ ex %>%
   plot(digits = 2, max_features = 5, title = "Client 58, New York, Brooklyn")
 ```
 
-![plot of chunk unnamed-chunk-26](figures/report/fig-unnamed-chunk-26-1.png)
+![plot of chunk unnamed-chunk-28](figures/report/fig-unnamed-chunk-28-1.png)
 Sharp value of New York
 
 ```r
@@ -702,7 +773,7 @@ shap <- predict_parts(explainer = ex,
 plot(shap, show_boxplots = FALSE, title = "Client 58, New York, Brooklyn")
 ```
 
-![plot of chunk unnamed-chunk-27](figures/report/fig-unnamed-chunk-27-1.png)
+![plot of chunk unnamed-chunk-29](figures/report/fig-unnamed-chunk-29-1.png)
 Break-down plot of NC
 
 ```r
@@ -711,7 +782,7 @@ ex %>%
   plot(digits = 2, max_features = 5, title = "Client 412, North Carolina, Asheville")
 ```
 
-![plot of chunk unnamed-chunk-28](figures/report/fig-unnamed-chunk-28-1.png)
+![plot of chunk unnamed-chunk-30](figures/report/fig-unnamed-chunk-30-1.png)
 Sharp Value of NC
 
 ```r
@@ -725,7 +796,7 @@ shap <- predict_parts(explainer = ex,
 plot(shap, show_boxplots = FALSE, title = "Client 412, North Carolina, Asheville")
 ```
 
-![plot of chunk unnamed-chunk-29](figures/report/fig-unnamed-chunk-29-1.png)
+![plot of chunk unnamed-chunk-31](figures/report/fig-unnamed-chunk-31-1.png)
 Variable importance
 
 ```r
@@ -741,12 +812,12 @@ trained_forest %>%
   guides(fill = "none") + labs(y = "Variable", x = "Importance")
 ```
 
-![plot of chunk unnamed-chunk-30](figures/report/fig-unnamed-chunk-30-1.png)
+![plot of chunk unnamed-chunk-32](figures/report/fig-unnamed-chunk-32-1.png)
 
 
 # Short-term model
 
-## Intro
+## Introduction
 
 Now that we have introduced the long-term model and presented its results, we can move to the next step: integrating the time factor. To do this, we will be using the weekly_data through all this section. 
 
@@ -778,7 +849,7 @@ weekly_data
 ## #   ihme_deaths <dbl>
 ```
 
-## Methods
+## Model selection
 
 We first start by dividing our timeline into training and testing sets: we take all the dates before January 1 2021 as our training set and all the dates from January 1 2021 to April 1 2021 as our test set (so 4 months later). Our goal is to try and use the data from our clients' performance before January 1 to predict their performance after this date. 
 
@@ -795,8 +866,6 @@ test <-
 
 That are two mains things that set this model apart from the long term model introduced in the first section. First, the AE is updated weekly as opposed to the long term model where the AE is taken yearly. Second, we are adding weekly deaths as one of the predictors in addition to the variables introduced in the long term model. Now, that we have a clear understanding of the predictors in the short term model, the question that arises is how we can use the weekly deaths in the testing time (since such information won't be available for us in the "future"). To solve this issue, we decided to forecast the deaths for this "future" period: so we will use the weekly deaths from March 2020 to January 2021 and forecast the weekly deaths 4 months later. To do so, we will use the fully defaulted ARIMA forecaster. 
 
-
-We will be using 
 
 ```r
 library(fable)
@@ -987,7 +1056,7 @@ wflows <-
 ```
 
 ```
-## [15:16:41] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [15:42:40] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 ```r
@@ -1020,7 +1089,8 @@ wflows %>%
   facet_wrap( ~ metric)
 ```
 
-![plot of chunk unnamed-chunk-38](figures/report/fig-unnamed-chunk-38-1.png)
+![plot of chunk unnamed-chunk-40](figures/report/fig-unnamed-chunk-40-1.png)
+
 One can wonder how much our models are being affected by the forecasting of deaths. Let's replace forecasted_test by test and let's see what happens. (So, now actual deaths is used insetad of forecasted deaths).We will figure out there the difference is not very big and somehow our forecasting is not affecting the models in a bad way. 
 
 
@@ -1051,10 +1121,10 @@ wflows_cheat %>%
   facet_wrap( ~ metric)
 ```
 
-![plot of chunk unnamed-chunk-39](figures/report/fig-unnamed-chunk-39-1.png)
+![plot of chunk unnamed-chunk-41](figures/report/fig-unnamed-chunk-41-1.png)
 
 
-## Results
+## Tuning Boosted Trees Model
 
 Comparing the models above, we can see that the Boosted Trees is the best model. So, we use it for the rest of the project, we tune it, and we report the results. 
 
@@ -1153,6 +1223,7 @@ tree depth: An integer for the maximum depth of the tree (i.e. number of splits)
 learn_rate: A number for the rate at which the boosting algorithm adapts from iteration-to-iteration. 
 We start with 10 different sets of parameters, and then finetune it using 20 iterations of simulated annealing.
 We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
+
 
 
 
@@ -1316,6 +1387,7 @@ forecast <-
 
 ## Warning in sqrt(diag(best$var.coef)): NaNs produced
 ```
+
 We create a new data called "forecast_data" where the actual deaths are replaced by the forecasted deaths. 
 So, now we have weekly_data that contains the "actual_deaths" and we have "forecasted_data" that contains the "forecasted_deaths" instead.
 
@@ -1410,7 +1482,8 @@ tests %>%
 ## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
 ```
 
-![plot of chunk unnamed-chunk-53](figures/report/fig-unnamed-chunk-53-1.png)
+![plot of chunk unnamed-chunk-55](figures/report/fig-unnamed-chunk-55-1.png)
+
 We then compare these two plots with the two we get when we replace forecasted deaths by actual deaths. We can see that the difference is not large and somehow our machine learning models have been able to have good performance with the forecasted deaths. 
 
 
@@ -1442,9 +1515,9 @@ tests %>%
 ## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
 ```
 
-![plot of chunk unnamed-chunk-54](figures/report/fig-unnamed-chunk-54-1.png)
+![plot of chunk unnamed-chunk-56](figures/report/fig-unnamed-chunk-56-1.png)
 
-### Explaining outcomes
+## Explaining outcomes
 
 
 One of the most important part in any model is interpreting the result. Model interpretability helps extracting insight and clarity regarding how the algorithms are performing. 
@@ -1497,7 +1570,7 @@ predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
   plot(digits = 2, max_features = 5, title = "Client 397")
 ```
 
-![plot of chunk unnamed-chunk-55](figures/report/fig-unnamed-chunk-55-1.png)
+![plot of chunk unnamed-chunk-57](figures/report/fig-unnamed-chunk-57-1.png)
 
 ```r
 test_obs <-
@@ -1509,7 +1582,7 @@ predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
   plot(digits = 2, max_features = 5, title = "Client 405")
 ```
 
-![plot of chunk unnamed-chunk-55](figures/report/fig-unnamed-chunk-55-2.png)
+![plot of chunk unnamed-chunk-57](figures/report/fig-unnamed-chunk-57-2.png)
 
 We use client 405 (Not Adverse) from our known clients and client 397 (Adverse) from our unknown clients. 
 The prediction in blue is the probability that the client is not adverse. For client 405, since the prediction is 0.53 (>0.5), this client is not adverse. For client 397, since the prediction is 0.37 (<0.5), this client is adverse. Now, a red bar means that this predictor has a negative contribution to the non-adversability of the client. And a green bar means that this predictor has  a positive contribution in the non-adversability of the client. 
@@ -2037,7 +2110,7 @@ result %>%
     )
 ```
 
-![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-1.png)
+![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-1.png)
 
 ```r
 result1 %>%
@@ -2054,7 +2127,7 @@ result1 %>%
     )
 ```
 
-![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-2.png)
+![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-2.png)
 
 ```r
 result2 %>%
@@ -2071,7 +2144,7 @@ result2 %>%
     )
 ```
 
-![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-3.png)
+![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-3.png)
 *Plot sens, spec, accuracy*
 
 Classify whether the client is adverse or not adverse: `shrunk_ae > 2.5`.
@@ -2114,7 +2187,7 @@ result %>%
   ggtitle("With IHME death data")
 ```
 
-![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-1.png)
+![plot of chunk unnamed-chunk-79](figures/report/fig-unnamed-chunk-79-1.png)
 
 ```r
 result1 %>%
@@ -2141,7 +2214,7 @@ result1 %>%
   ggtitle("With zip death data")
 ```
 
-![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-2.png)
+![plot of chunk unnamed-chunk-79](figures/report/fig-unnamed-chunk-79-2.png)
 
 ```r
 result2 %>%
@@ -2168,7 +2241,7 @@ result2 %>%
   ggtitle("Without death data")
 ```
 
-![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-3.png)
+![plot of chunk unnamed-chunk-79](figures/report/fig-unnamed-chunk-79-3.png)
 *Calculate predict claims*
 
 We calculate the predicted weekly claim by:
@@ -2261,7 +2334,7 @@ predclaim%>%
   ggtitle(" Weekly total claim with IHME death")
 ```
 
-![plot of chunk unnamed-chunk-81](figures/report/fig-unnamed-chunk-81-1.png)
+![plot of chunk unnamed-chunk-83](figures/report/fig-unnamed-chunk-83-1.png)
 
 ```r
 predclaim1%>%
@@ -2279,7 +2352,7 @@ predclaim1%>%
   ggtitle(" Weekly total claim with zip death")
 ```
 
-![plot of chunk unnamed-chunk-81](figures/report/fig-unnamed-chunk-81-2.png)
+![plot of chunk unnamed-chunk-83](figures/report/fig-unnamed-chunk-83-2.png)
 
 ```r
 predclaim2%>%
@@ -2297,7 +2370,7 @@ predclaim2%>%
   ggtitle(" Weekly total claim without death")
 ```
 
-![plot of chunk unnamed-chunk-81](figures/report/fig-unnamed-chunk-81-3.png)
+![plot of chunk unnamed-chunk-83](figures/report/fig-unnamed-chunk-83-3.png)
 Half year total claims for each client vs predicted total claims
 
 Each client, the result is not good since it is a global model for all clients.
@@ -2321,7 +2394,7 @@ predclaim%>%
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with IHME death")
 ```
 
-![plot of chunk unnamed-chunk-82](figures/report/fig-unnamed-chunk-82-1.png)
+![plot of chunk unnamed-chunk-84](figures/report/fig-unnamed-chunk-84-1.png)
 
 ```r
 predclaim1%>%
@@ -2341,7 +2414,7 @@ predclaim1%>%
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with zip death")
 ```
 
-![plot of chunk unnamed-chunk-82](figures/report/fig-unnamed-chunk-82-2.png)
+![plot of chunk unnamed-chunk-84](figures/report/fig-unnamed-chunk-84-2.png)
 
 ```r
 predclaim2%>%
@@ -2361,7 +2434,7 @@ predclaim2%>%
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client without death data")
 ```
 
-![plot of chunk unnamed-chunk-82](figures/report/fig-unnamed-chunk-82-3.png)
+![plot of chunk unnamed-chunk-84](figures/report/fig-unnamed-chunk-84-3.png)
 
 *Why this model doesn't work*
 
