@@ -569,7 +569,7 @@ confusion_matrix %>% summary()
 
 Pick two specific clients as examples to illustrate our model result. We choose client 58 who located in Brooklyn, New York and client 412 who located in Asheville, North Carolina. The first one faced adverse mortality and the second one didn't. 
 
-Load `DALEX` package for plot break_down and sharp value plot.
+Load `DALEX` package for plot break_down and SHAP value plot.
 ```{r}
 library(DALEX)
 fit_parsnip <- trained_forest %>% extract_fit_parsnip
@@ -593,7 +593,8 @@ shap <- predict_parts(explainer = ex,
                       new_observation = train %>% slice(343),
                                  type = "shap",
                                   B = 25)
-                               
+```
+```{r}
 plot(shap, show_boxplots = FALSE, title = "Client 58, New York, Brooklyn")
 ```
 Break-down plot of NC
@@ -608,11 +609,12 @@ shap <- predict_parts(explainer = ex,
                       new_observation = test %>% slice(80),
                                  type = "shap",
                                   B = 25)
-                               
+```
+```{r}
 plot(shap, show_boxplots = FALSE, title = "Client 412, North Carolina, Asheville")
 ```
 Variable importance
-```{r fig.width = 10, dpi = 400}
+```{r}
 trained_forest %>%
   extract_fit_engine() %>%
   importance() %>%
@@ -1071,7 +1073,7 @@ tests %>%
 ```
 We then compare these two plots with the two we get when we replace forecasted deaths by actual deaths. We can see that the difference is not large and somehow our machine learning models have been able to have good performance with the forecasted deaths. 
 
-```{r fig.width = 5.5}
+```{r}
 tests <-
   tribble(
     ~id, ~set,
@@ -1104,7 +1106,7 @@ In the following, we will use the DALEX package. DALEX uses a process called bre
 
 
 We explain how much each feature contributes to the value of a single prediction using the following. We will explain the plots after running the code. 
-```{r fig.height = 5, fig.width = 5}
+```{r}
 library(DALEX)
 library(DALEXtra)
 
@@ -1524,7 +1526,7 @@ result2 <- readRDS("resultwithoutdeath.rds")
 *Visualize clients forecast*
 
 We pick client `1`, `5`, `7`, `10`, `61`, `100` as examples. We add the solid line `threshold = 2.5` to help us to see whether this client meet adverse mortality event.The exact AE is in the range of confidence interval. 
-```{r, fig.width=12, fig.height= 12, warning = FALSE}
+```{r warning = FALSE}
 result %>%
     group_by(client) %>%
     filter(client %in% c("7","10", "61","100"))%>%
@@ -1577,7 +1579,7 @@ We can get the following conclusions:
 ```{r}
 threshold <- 2.5
 ```
-```{r, fig.width=12}
+```{r}
 result %>%
   select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
   rename(model = .model_id, value = .value, date= .index)%>%
@@ -1725,7 +1727,7 @@ We can draw the following conclusion:
 
 2. Death data improve the results greatly.The zip death have the best result since it is the exact death of the area. And IHME death data result is also good. Without death data, none of 5 models can catch the change of claims.
 
-```{r , fig.width=12}
+```{r}
 predclaim%>%
   group_by(date)%>%
   summarise(expected = sum(expected)/52.18,
@@ -1772,7 +1774,7 @@ Half year total claims for each client vs predicted total claims
 
 Each client, the result is not good since it is a global model for all clients.
 
-```{r , fig.width=12, warning = FALSE}
+```{r warning = FALSE}
 predclaim%>%
   filter(client %in% c(1:50))%>%
   group_by(client)%>%

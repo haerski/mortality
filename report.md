@@ -624,6 +624,105 @@ confusion_matrix %>% summary()
 ## 13 f_meas               binary         0.888
 ```
 
+Pick two specific clients as examples to illustrate our model result. We choose client 58 who located in Brooklyn, New York and client 412 who located in Asheville, North Carolina. The first one faced adverse mortality and the second one didn't. 
+
+Load `DALEX` package for plot break_down and SHAP value plot.
+
+```r
+library(DALEX)
+fit_parsnip <- trained_forest %>% extract_fit_parsnip
+trained_recipe <- trained_forest %>% extract_recipe
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+```
+Break-down plot of New York
+
+```r
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+```
+
+```
+## Preparation of a new explainer is initiated
+##   -> model label       :  model_fit  ( [33m default [39m )
+##   -> data              :  368  rows  21  cols 
+##   -> data              :  tibble converted into a data.frame 
+##   -> target variable   :  not specified! ( [31m WARNING [39m )
+##   -> predict function  :  yhat.model_fit  will be used ( [33m default [39m )
+##   -> predicted values  :  No value for predict function target column. ( [33m default [39m )
+##   -> model_info        :  package parsnip , ver. 0.1.7 , task classification ( [33m default [39m ) 
+##   -> model_info        :  Model info detected classification task but 'y' is a NULL .  ( [31m WARNING [39m )
+##   -> model_info        :  By deafult classification tasks supports only numercical 'y' parameter. 
+##   -> model_info        :  Consider changing to numerical vector with 0 and 1 values.
+##   -> model_info        :  Otherwise I will not be able to calculate residuals or loss function.
+##   -> predicted values  :  numerical, min =  2e-04 , mean =  0.2594435 , max =  0.9503167  
+##   -> residual function :  difference between y and yhat ( [33m default [39m )
+##  [32m A new explainer has been created! [39m
+```
+
+```r
+ex %>%
+  predict_parts(train %>% slice(343)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 58, New York, Brooklyn")
+```
+
+![plot of chunk unnamed-chunk-26](figures/report/fig-unnamed-chunk-26-1.png)
+Sharp value of New York
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = train %>% slice(343),
+                                 type = "shap",
+                                  B = 25)
+```
+
+```r
+plot(shap, show_boxplots = FALSE, title = "Client 58, New York, Brooklyn")
+```
+
+![plot of chunk unnamed-chunk-27](figures/report/fig-unnamed-chunk-27-1.png)
+Break-down plot of NC
+
+```r
+ex %>%
+  predict_parts(test %>% slice(80)) %>%
+  plot(digits = 2, max_features = 5, title = "Client 412, North Carolina, Asheville")
+```
+
+![plot of chunk unnamed-chunk-28](figures/report/fig-unnamed-chunk-28-1.png)
+Sharp Value of NC
+
+```r
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "shap",
+                                  B = 25)
+```
+
+```r
+plot(shap, show_boxplots = FALSE, title = "Client 412, North Carolina, Asheville")
+```
+
+![plot of chunk unnamed-chunk-29](figures/report/fig-unnamed-chunk-29-1.png)
+Variable importance
+
+```r
+trained_forest %>%
+  extract_fit_engine() %>%
+  importance() %>%
+  as_tibble_row() %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Importance") %>%
+  slice_max(Importance, n = 10) %>%
+  ggplot(aes(y = fct_reorder(factor(Variable), Importance), x = Importance, fill = fct_reorder(factor(Variable), Importance))) +
+  geom_col() +
+  scale_fill_brewer(palette = "Spectral") +
+  guides(fill = "none") + labs(y = "Variable", x = "Importance")
+```
+
+![plot of chunk unnamed-chunk-30](figures/report/fig-unnamed-chunk-30-1.png)
+
 
 # Short-term model
 
@@ -848,7 +947,7 @@ wflows %>%
   facet_wrap( ~ metric)
 ```
 
-![plot of chunk unnamed-chunk-32](figures/report/fig-unnamed-chunk-32-1.png)
+![plot of chunk unnamed-chunk-38](figures/report/fig-unnamed-chunk-38-1.png)
 One can wonder how much our models are being affected by the forecasting of deaths. Let's replace forecasted_test by test and let's see what happens. (So, now actual deaths is used insetad of forecasted deaths).We will figure out there the difference is not very big and somehow our forecasting is not affecting the models in a bad way. 
 
 
@@ -886,7 +985,7 @@ wflows_cheat %>%
   facet_wrap( ~ metric)
 ```
 
-![plot of chunk unnamed-chunk-33](figures/report/fig-unnamed-chunk-33-1.png)
+![plot of chunk unnamed-chunk-39](figures/report/fig-unnamed-chunk-39-1.png)
 
 
 ## Results
@@ -1245,7 +1344,7 @@ tests %>%
 ## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
 ```
 
-![plot of chunk unnamed-chunk-47](figures/report/fig-unnamed-chunk-47-1.png)
+![plot of chunk unnamed-chunk-53](figures/report/fig-unnamed-chunk-53-1.png)
 We then compare these two plots with the two we get when we replace forecasted deaths by actual deaths. We can see that the difference is not large and somehow our machine learning models have been able to have good performance with the forecasted deaths. 
 
 
@@ -1277,10 +1376,17 @@ tests %>%
 ## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
 ```
 
-![plot of chunk unnamed-chunk-48](figures/report/fig-unnamed-chunk-48-1.png)
+![plot of chunk unnamed-chunk-54](figures/report/fig-unnamed-chunk-54-1.png)
 
 ### Explaining outcomes
-Use DALEX
+
+
+One of the most important part in any model is interpreting the result. Model interpretability helps extracting insight and clarity regarding how the algorithms are performing. 
+There are several tools that can be used to increase the model transparency. 
+In the following, we will use the DALEX package. DALEX uses a process called breakdown to compute localized variable importance scores. For each client, we can explain why a case receives its prediction and how each predictor contributes either positively or negatively to the target variable. The local interpretability enables us to pinpoint and contrast the impacts of the factors.
+
+
+We explain how much each feature contributes to the value of a single prediction using the following. We will explain the plots after running the code. 
 
 ```r
 library(DALEX)
@@ -1325,7 +1431,7 @@ predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
   plot(digits = 2, max_features = 5, title = "Client 397")
 ```
 
-![plot of chunk unnamed-chunk-49](figures/report/fig-unnamed-chunk-49-1.png)
+![plot of chunk unnamed-chunk-55](figures/report/fig-unnamed-chunk-55-1.png)
 
 ```r
 test_obs <-
@@ -1337,10 +1443,11 @@ predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
   plot(digits = 2, max_features = 5, title = "Client 405")
 ```
 
-![plot of chunk unnamed-chunk-49](figures/report/fig-unnamed-chunk-49-2.png)
+![plot of chunk unnamed-chunk-55](figures/report/fig-unnamed-chunk-55-2.png)
 
-
-
+We use client 405 (Not Adverse) from our known clients and client 397 (Adverse) from our unknown clients. 
+The prediction in blue is the probability that the client is not adverse. For client 405, since the prediction is 0.53 (>0.5), this client is not adverse. For client 397, since the prediction is 0.37 (<0.5), this client is adverse. Now, a red bar means that this predictor has a negative contribution to the non-adversability of the client. And a green bar means that this predictor has  a positive contribution in the non-adversability of the client. 
+For instance, comparing clients 397 and 405, we can see that smoothed_deaths for client 397 is so much bigger than the value for client 405 and hence the contribution of this predictor to the adversability is larger for client 397 (red bar is bigger). 
 
 
 
@@ -1864,7 +1971,7 @@ result %>%
     )
 ```
 
-![plot of chunk unnamed-chunk-69](figures/report/fig-unnamed-chunk-69-1.png)
+![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-1.png)
 
 ```r
 result1 %>%
@@ -1881,7 +1988,7 @@ result1 %>%
     )
 ```
 
-![plot of chunk unnamed-chunk-69](figures/report/fig-unnamed-chunk-69-2.png)
+![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-2.png)
 
 ```r
 result2 %>%
@@ -1898,7 +2005,7 @@ result2 %>%
     )
 ```
 
-![plot of chunk unnamed-chunk-69](figures/report/fig-unnamed-chunk-69-3.png)
+![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-3.png)
 *Plot sens, spec, accuracy*
 
 Classify whether the client is adverse or not adverse: `shrunk_ae > 2.5`.
@@ -1941,7 +2048,7 @@ result %>%
   ggtitle("With IHME death data")
 ```
 
-![plot of chunk unnamed-chunk-71](figures/report/fig-unnamed-chunk-71-1.png)
+![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-1.png)
 
 ```r
 result1 %>%
@@ -1968,7 +2075,7 @@ result1 %>%
   ggtitle("With zip death data")
 ```
 
-![plot of chunk unnamed-chunk-71](figures/report/fig-unnamed-chunk-71-2.png)
+![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-2.png)
 
 ```r
 result2 %>%
@@ -1995,7 +2102,7 @@ result2 %>%
   ggtitle("Without death data")
 ```
 
-![plot of chunk unnamed-chunk-71](figures/report/fig-unnamed-chunk-71-3.png)
+![plot of chunk unnamed-chunk-77](figures/report/fig-unnamed-chunk-77-3.png)
 *Calculate predict claims*
 
 We calculate the predicted weekly claim by:
@@ -2088,7 +2195,7 @@ predclaim%>%
   ggtitle(" Weekly total claim with IHME death")
 ```
 
-![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-1.png)
+![plot of chunk unnamed-chunk-81](figures/report/fig-unnamed-chunk-81-1.png)
 
 ```r
 predclaim1%>%
@@ -2106,7 +2213,7 @@ predclaim1%>%
   ggtitle(" Weekly total claim with zip death")
 ```
 
-![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-2.png)
+![plot of chunk unnamed-chunk-81](figures/report/fig-unnamed-chunk-81-2.png)
 
 ```r
 predclaim2%>%
@@ -2124,7 +2231,7 @@ predclaim2%>%
   ggtitle(" Weekly total claim without death")
 ```
 
-![plot of chunk unnamed-chunk-75](figures/report/fig-unnamed-chunk-75-3.png)
+![plot of chunk unnamed-chunk-81](figures/report/fig-unnamed-chunk-81-3.png)
 Half year total claims for each client vs predicted total claims
 
 Each client, the result is not good since it is a global model for all clients.
@@ -2148,7 +2255,7 @@ predclaim%>%
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with IHME death")
 ```
 
-![plot of chunk unnamed-chunk-76](figures/report/fig-unnamed-chunk-76-1.png)
+![plot of chunk unnamed-chunk-82](figures/report/fig-unnamed-chunk-82-1.png)
 
 ```r
 predclaim1%>%
@@ -2168,7 +2275,7 @@ predclaim1%>%
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client with zip death")
 ```
 
-![plot of chunk unnamed-chunk-76](figures/report/fig-unnamed-chunk-76-2.png)
+![plot of chunk unnamed-chunk-82](figures/report/fig-unnamed-chunk-82-2.png)
 
 ```r
 predclaim2%>%
@@ -2188,7 +2295,7 @@ predclaim2%>%
   ggtitle("Total claims for 2021-01-01 to 2021-06-01 for each client without death data")
 ```
 
-![plot of chunk unnamed-chunk-76](figures/report/fig-unnamed-chunk-76-3.png)
+![plot of chunk unnamed-chunk-82](figures/report/fig-unnamed-chunk-82-3.png)
 
 *Why this model doesn't work*
 
