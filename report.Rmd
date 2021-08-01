@@ -568,16 +568,6 @@ processed_data <-
   ungroup() %>%
   mutate(class = factor(if_else(shrunk_ae > 2.5, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = shrunk_ae)
 ```
-Now processed_data contains the following:
-1. claims amount for each week (time dependent)
-2. Zip death for each week (time dependent)
-3. Smoothed AE and smoothed weekly zip deaths 
-4. Shrunk smoothed AE 
-5. Class (adverse or not)
-6. Weekly AE ( ae = claims / (expected / 52.18) )
-7. Zip3 information and client characteristic (non time dependent)
-
-
 Since we will also use IHME forecasts (more trustworthy than our naive ARIMA),we will need some additional data wrangling.
 
 We start by loading state name and FIPS codes
@@ -625,7 +615,19 @@ processed_data <-
   ungroup() %>%
   mutate(ihme_deaths = replace_na(ihme_deaths, 0))
 ```
-Now the `processed_data` contains the following information:
+Now processed_data contains the following:
+1. claims amount for each week (time dependent)
+2. zip death for each week (time dependent)
+3. smoothed AE and smoothed weekly zip deaths 
+4. shrunk smoothed AE 
+5. class (adverse or not)
+6. weekly AE ( ae = claims / (expected / 52.18) )
+7. zip3 information and client characteristic (non time dependent)
+8. COVID-19 projections from IHME
+
+
+
+
 
 We save `processed_data` in `data/processed_data_20_12_23.feather`.
 ```{r}
