@@ -685,9 +685,286 @@ trained_forest %>%
 
 Now that we have introduced the long-term model and presented its results, we can move to the next step: integrating the time factor. To do this, we will be using the weekly_data through all this section. 
 
+We explain how we obtained the dataframe weekly_data.
+
+To begin with, we used the following 3 data sets:
+1. `data/deaths_zip3.feather`: daily covid deaths data.
+2. `data/simulation_data/all_persons.feather`:  a tibble frame created in our data wrangling process, containing simulated data for each participants from our clients.
+3. `data/data.feather` : zip3 data created in data wrangling process.
+4. `data/2020_12_23/reference_hospitalization_all_locs.csv`: data from IHME as of Dec 23 2020
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(themis)
+library(magrittr)
+library(ggbeeswarm)
+library(finetune)
+library(lubridate)
+library(glue)
+library(slider)
+per <- read_feather("data/simulation_data/all_persons.feather")
+
+clients <-
+  per %>%
+  group_by(client) %>%
+  summarize(
+    zip3 = first(zip3),
+    size = n(),
+    volume = sum(FaceAmt),
+    avg_qx = mean(qx),
+    avg_age = mean(Age),
+    per_male = sum(Sex == "Male") / size,
+    per_blue_collar = sum(collar == "blue") / size,
+    expected = sum(qx * FaceAmt),
+    actual_2021 = sum(FaceAmt[year == 2021], na.rm = TRUE),
+    ae_2021 = actual_2021 / (expected / 2),
+    actual_2020 = sum(FaceAmt[year == 2020], na.rm = TRUE),
+    ae_2020 = actual_2020 / expected,
+    actual_2019 = sum(FaceAmt[year == 2019], na.rm = TRUE),
+    ae_2019 = actual_2019 / expected,
+    adverse = as_factor(if_else(ae_2020 > 3, "ae > 3", "ae < 3"))
+  ) %>%
+  relocate(adverse, ae_2020, .after = zip3) %>%
+  mutate(adverse = fct_relevel(adverse, c("ae > 3", "ae < 3")))
+
+
+zip_data <-
+  read_feather("data/data.feather") %>%
+  mutate(
+    density = POP / AREALAND,
+    AREALAND = NULL,
+    AREA = NULL,
+    HU = NULL,
+    vaccinated = NULL,
+    per_lib = NULL,
+    per_green = NULL,
+    per_other = NULL,
+    per_rep = NULL,
+    unempl_2020 = NULL,
+    deaths_covid = NULL,
+    deaths_all = NULL
+  ) %>%
+  rename(
+    unemp = unempl_2019,
+    hes_uns = hes_unsure,
+    str_hes = strong_hes,
+    income = Median_Household_Income_2019
+  )
+
+
+clients %<>%
+  inner_join(zip_data, by = "zip3") %>%
+  drop_na()
+```
+
+We take daily covid deaths (`data/deaths_zip3.feather`) and make them weekly. We look at weekly deaths instead of deaths to date.
+```{r}
+deaths <-
+  read_feather("data/deaths_zip3.feather") %>%
+  mutate(date = ceiling_date(date, unit = "week")) %>%
+  group_by(zip3, date) %>%
+  summarize(totdeaths = max(deaths)) %>%
+  mutate(zip_deaths = totdeaths - lag(totdeaths, default = 0)) %>%
+  select(-totdeaths) %>%
+  ungroup()
+```
+One thing to note is that there is no death data for zipcodes 202, 204, 753, 772, which is fine since there is no zip_data for those either.
+
+Next we look at the deaths only. We created a tibble `per` containing all the people that die and their deathweek. Everyone should die only once. 
+```{r}
+per %<>%
+  drop_na() %>%
+  select(-month)
+```
+
+2019 didn't have 53 weeks, so we change the deaths on week 53 in 2019 to death in week 1 of 2020. 
+
+```{r}
+wk53 <-
+  per %>%
+  filter(year == 2019, week == 53) %>%
+  mutate(year = 2020, week = 1)
+per %<>%
+  rows_update(wk53, by = c("client", "participant"))
+```
+
+We convert the week and year into the last date of that week.
+```{r}
+per %<>%
+  nest_by(week, year) %>%
+  mutate(date = ceiling_date(ymd(glue("{year}-01-01")) + weeks(week - 1), unit = "week")) %>%
+  ungroup() %>%
+  select(-week, -year) %>%
+  unnest(cols = c(data))
+```
+
+We note that there are 4 clients that won't have any deaths.
+```{r}
+no_deaths <-
+  clients %>%
+  anti_join(per, by = "client") %>%
+  select(client) %>%
+  mutate(date = ceiling_date(ymd("2019-01-01"), unit = "week"), claims = 0)
+```
+
+
+Next, we need some kind of a rolling count for AE. We use the package `slider`.
+
+We want actual claims per week for each client. We note that there are 4 clients that won't have any deaths. We compute face amount per week for each client. This number is 0 if the client has no deaths that week. We put this information into the tibble `weekly_claims`. 
+```{r}
+weekly_claims <-
+  per %>%
+  group_by(date, client) %>%
+  summarize(claims = sum(FaceAmt), .groups = "drop") %>%
+  bind_rows(no_deaths) %>%
+  complete(date, client, fill = list(claims = 0))
+```
+
+Then we merge everything to get a tibble called 'weekly_data'. This contains the following information for each week (from 2019-01-06 from 2021-06-27), each client:
+1. claims amount for each week (time dependent)
+2. Zip death for each week (time dependent)
+3. Weekly ae ( ae = claims / (expected / 52.18) )
+4. Zip3 information and client characteristic (non time dependent)
+```{r}
+weekly_data <-
+  clients %>%
+  left_join(weekly_claims, by = c("client")) %>%
+  relocate(date) %>%
+  relocate(claims, .after = zip3) %>%
+  left_join(deaths, by = c("date", "zip3")) %>%
+  relocate(zip_deaths, .after = claims) %>%
+  mutate(zip_deaths = replace_na(zip_deaths, 0), ae = claims / (expected / 52.18))
+
+```
+
+
+We add a rolling AE number. We will smooth the actual claims number of each week by taking a weighted average of actual claims in the 13 weeks prior. The weights come from a Gaussian distribution.
+```{r}
+smoother <- function(x) { weighted.mean(x, dnorm(seq(-1, 0, length.out = length(x)), sd = 0.33)) }
+sliding_smoother <-
+  timetk::slidify(smoother, .period = 13, .align = "right")
+```
+The function `sliding_smoother` takes a vector and outputs a vector of smoothed values. 
+
+We add smoothed AE and smoothed weekly zip deaths to the tibble `weekly_data`. 
+```{r}
+weekly_data <-
+  weekly_data %>%
+  group_by(client) %>%
+  mutate(smoothed_ae = sliding_smoother(ae), smoothed_deaths = sliding_smoother(zip_deaths), .before = size) %>%
+  drop_na()
+```
+
+Then we shrink smoothed ae based on the $log(Volume * average q_x)$. This gives us some kind of a measure of client size and mortality. We add the shrunk smoothed AE to `weekly_data` to get the tibble `processed_data`. 
+```{r}
+client_shrinkage <-
+  weekly_data %>%
+  summarize(dep_var = first(volume * avg_qx)) %>%
+  mutate(shrinkage = rescale(log(dep_var), to = c(0.3, 1)))
+
+processed_data <-
+  weekly_data %>%
+  left_join(client_shrinkage, by = "client") %>%
+  ungroup() %>%
+  mutate(shrunk_ae = smoothed_ae * shrinkage, .after = smoothed_ae)
+```
+
+We compute the 25th percentile of Shrunk smoothed AE of each week. We choose `smoothed shrunk AE > 2.5` as "Adverse". (2.5 is close to the 25th percentile of the weekly shrunk smoothedAE over all time). We add this information to the tibble `processed_data`. 
+
+```{r}
+processed_data <-
+  processed_data %>%
+  ungroup() %>%
+  mutate(class = factor(if_else(shrunk_ae > 2.5, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = shrunk_ae)
+```
+Now processed_data contains the following:
+1. claims amount for each week (time dependent)
+2. Zip death for each week (time dependent)
+3. Smoothed AE and smoothed weekly zip deaths 
+4. Shrunk smoothed AE 
+5. Class (adverse or not)
+6. Weekly AE ( ae = claims / (expected / 52.18) )
+7. Zip3 information and client characteristic (non time dependent)
+
+
+Since we will also use IHME forecasts (more trustworthy than our naive ARIMA),we will need some additional data wrangling.
+
+We start by loading state name and FIPS codes
+```{r}
+states <-
+  read_delim("data/state.txt", delim = "|") %>%
+  select(STATE, STATE_NAME)
+```
+
+We augment the `processed_data` by adding the state name
+```{r}
+zip_to_state <-
+  read_csv("data/zcta_county_rel_10.txt") %>%
+  select(ZCTA5, STATE) %>%
+  mutate(zip3 = str_sub(ZCTA5, 1, 3), .keep = "unused") %>%
+  group_by(zip3) %>%
+  count(STATE, sort = TRUE) %>%
+  slice_head() %>%
+  ungroup() %>%
+  left_join(states, by = "STATE") %>%
+  select(-STATE, -n)
+
+processed_data <-
+  processed_data %>%
+  nest_by(zip3) %>%
+  left_join(zip_to_state, by = "zip3") %>%
+  unnest(cols = c(data))
+```
+
+Next we read the data from IHME as of Dec 23 2020 and add it to `processed_data`
+
+```{r}
+ihme <-
+  read_csv("data/2020_12_23/reference_hospitalization_all_locs.csv") %>%
+  rename(STATE_NAME = location_name) %>%
+  semi_join(processed_data, by = "STATE_NAME") %>%
+  select(STATE_NAME, date, deaths_mean) %>%
+  mutate(date = ceiling_date(date, unit = "week")) %>%
+  group_by(STATE_NAME, date) %>%
+  summarize(ihme_deaths = sum(deaths_mean))
+
+processed_data <-
+  processed_data %>%
+  left_join(ihme, by = c("date", "STATE_NAME")) %>%
+  ungroup() %>%
+  mutate(ihme_deaths = replace_na(ihme_deaths, 0))
+```
+Now the `processed_data` contains the following information:
+
+We save `processed_data` in `data/processed_data_20_12_23.feather`.
+```{r}
+write_feather(processed_data, "data/processed_data_20_12_23.feather")
+```
+
+Removing some columns which we wouldn't use in prediction, we get our main data `weekly_data` for the short term models.
+```{r}
+weekly_data <-
+  read_feather("data/processed_data_20_12_23.feather") %>%
+  select(-ae_2021, -ae_2020, -ae_2019,
+         -actual_2021, -actual_2020, -actual_2019, -adverse,
+         -STATE_NAME, -shrinkage,  -dep_var) %>%
+  arrange(client, date)
+```
+
+
+
+
+
+
 ```{r}
 weekly_data
 ```
+
+
+
+
 
 ## Model selection
 
