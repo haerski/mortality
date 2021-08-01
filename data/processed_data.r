@@ -11,7 +11,7 @@ library(finetune)
 library(lubridate)
 library(glue)
 library(slider)
-per <- read_feather("data/simulation_data/all_persons.feather")
+per <- read_feather("simulation_data/all_persons.feather")
 
 clients <-
   per %>%
@@ -38,7 +38,7 @@ clients <-
 
 
 zip_data <-
-  read_feather("data/data.feather") %>%
+  read_feather("data.feather") %>%
   mutate(
     density = POP / AREALAND,
     AREALAND = NULL,
@@ -66,7 +66,7 @@ clients %<>%
   drop_na()
 
 deaths <-
-  read_feather("data/deaths_zip3.feather") %>%
+  read_feather("deaths_zip3.feather") %>%
   mutate(date = ceiling_date(date, unit = "week")) %>%
   group_by(zip3, date) %>%
   summarize(totdeaths = max(deaths)) %>%
@@ -145,11 +145,11 @@ processed_data <-
   mutate(class = factor(if_else(shrunk_ae > 2.5, "Adverse", "Not adverse"), levels = c("Adverse", "Not adverse")), .after = shrunk_ae)
 
 states <-
-  read_delim("data/state.txt", delim = "|") %>%
+  read_delim("state.txt", delim = "|") %>%
   select(STATE, STATE_NAME)
 
 zip_to_state <-
-  read_csv("data/zcta_county_rel_10.txt") %>%
+  read_csv("zcta_county_rel_10.txt") %>%
   select(ZCTA5, STATE) %>%
   mutate(zip3 = str_sub(ZCTA5, 1, 3), .keep = "unused") %>%
   group_by(zip3) %>%
@@ -166,7 +166,7 @@ processed_data <-
   unnest(cols = c(data))
 
 ihme <-
-  read_csv("data/2020_12_23/reference_hospitalization_all_locs.csv") %>%
+  read_csv("2020_12_23/reference_hospitalization_all_locs.csv") %>%
   rename(STATE_NAME = location_name) %>%
   semi_join(processed_data, by = "STATE_NAME") %>%
   select(STATE_NAME, date, deaths_mean) %>%
@@ -180,4 +180,4 @@ processed_data <-
   ungroup() %>%
   mutate(ihme_deaths = replace_na(ihme_deaths, 0))
 
-write_feather(processed_data, "data/processed_data_20_12_23.feather")
+write_feather(processed_data, "processed_data_20_12_23.feather")

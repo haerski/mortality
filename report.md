@@ -7,7 +7,7 @@
 In this section, we describe our data gathering and tidying process.
 We will be making extensive use of the `tidyverse` family of packages.
 A series of scripts are used to generate tibbles, which are then saved in a `*.feather` for fast loading.
-A full list of scripts can be viewed in the Appendix (TODO!!!)
+A full list of scripts with their dependencies can be viewed in the Appendix.
 
 ```r
 library(tidyverse)
@@ -177,7 +177,7 @@ Additionally, election data is not available in Washington D.C., so we remove cl
 In the end, we have a total of 492 clients to work with.
 
 The data merging is done in the file `processed_data.r` which generates the file `data/processed_data_20_12_23.feather`.
-The dependency tree is outlined in the Appendix (TODO!!!)
+The dependency tree is outlined in the Appendix.
 
 After merging, this gives us a final dataset of 492 clients over 118 weeks ranging from Jan 1st 2019 to June 27th 2021.
 We make two separate tibbles.
@@ -243,8 +243,8 @@ Variable | Description
 `date` | the last day of the week (`lubridate::ceiling_date(date, unit = "week")`)
 `claims` | claims for that client on that week (\$)
 `zip_deaths` | number of deaths that week in the zipcode
-`smoothed_ae` | smoothed version of actual weekly AE (see TODO)
-`shrunk_ae` | shrunk version of smoothed weekly AE (see TODO)
+`smoothed_ae` | smoothed version of actual weekly AE (see the section on long-term models)
+`shrunk_ae` | shrunk version of smoothed weekly AE (see the section on long-term models)
 `ae` | actual weekly AE
 `ihme_deaths` | IHME Covid death forecasts. **These are only available until Apr 4th 2021, and are set to 0 after this date.**
 `hes`, `hes_uns`, `str_hes` | percentage of the zip population that are vaccine hesitant, hesitant or unsure, and strongly hesistan respectively
@@ -737,25 +737,25 @@ weekly_data
 
 ```
 ## # A tibble: 58,056 × 35
-##    zip3  date       client claims zip_deaths smoothed_ae shrunk_ae class  
-##    <chr> <date>     <chr>   <dbl>      <dbl>       <dbl>     <dbl> <fct>  
-##  1 018   2019-03-31 1           0          0           0         0 Not ad…
-##  2 018   2019-04-07 1           0          0           0         0 Not ad…
-##  3 018   2019-04-14 1           0          0           0         0 Not ad…
-##  4 018   2019-04-21 1           0          0           0         0 Not ad…
-##  5 018   2019-04-28 1           0          0           0         0 Not ad…
-##  6 018   2019-05-05 1           0          0           0         0 Not ad…
-##  7 018   2019-05-12 1           0          0           0         0 Not ad…
-##  8 018   2019-05-19 1           0          0           0         0 Not ad…
-##  9 018   2019-05-26 1           0          0           0         0 Not ad…
-## 10 018   2019-06-02 1           0          0           0         0 Not ad…
+##    zip3  date       client claims zip_deaths smoothed_ae shrunk_ae class      
+##    <chr> <date>     <chr>   <dbl>      <dbl>       <dbl>     <dbl> <fct>      
+##  1 018   2019-03-31 1           0          0           0         0 Not adverse
+##  2 018   2019-04-07 1           0          0           0         0 Not adverse
+##  3 018   2019-04-14 1           0          0           0         0 Not adverse
+##  4 018   2019-04-21 1           0          0           0         0 Not adverse
+##  5 018   2019-04-28 1           0          0           0         0 Not adverse
+##  6 018   2019-05-05 1           0          0           0         0 Not adverse
+##  7 018   2019-05-12 1           0          0           0         0 Not adverse
+##  8 018   2019-05-19 1           0          0           0         0 Not adverse
+##  9 018   2019-05-26 1           0          0           0         0 Not adverse
+## 10 018   2019-06-02 1           0          0           0         0 Not adverse
 ## # … with 58,046 more rows, and 27 more variables: smoothed_deaths <dbl>,
-## #   size <int>, volume <dbl>, avg_qx <dbl>, avg_age <dbl>,
-## #   per_male <dbl>, per_blue_collar <dbl>, expected <dbl>, nohs <dbl>,
-## #   hs <dbl>, college <dbl>, bachelor <dbl>, R_birth <dbl>,
-## #   R_death <dbl>, unemp <dbl>, poverty <dbl>, per_dem <dbl>, hes <dbl>,
-## #   hes_uns <dbl>, str_hes <dbl>, svi <dbl>, cvac <dbl>, income <dbl>,
-## #   POP <dbl>, density <dbl>, ae <dbl>, ihme_deaths <dbl>
+## #   size <int>, volume <dbl>, avg_qx <dbl>, avg_age <dbl>, per_male <dbl>,
+## #   per_blue_collar <dbl>, expected <dbl>, nohs <dbl>, hs <dbl>, college <dbl>,
+## #   bachelor <dbl>, R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>,
+## #   per_dem <dbl>, hes <dbl>, hes_uns <dbl>, str_hes <dbl>, svi <dbl>,
+## #   cvac <dbl>, income <dbl>, POP <dbl>, density <dbl>, ae <dbl>,
+## #   ihme_deaths <dbl>
 ```
 
 ## Methods
@@ -914,7 +914,7 @@ wflows <-
 ```
 
 ```
-## [11:31:59] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [14:17:31] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 ```r
@@ -957,15 +957,8 @@ wflows_cheat <-
   mutate(
     class_predict = map(wflows_fit, ~ predict(.x, test)),  
     prob_predict = map(wflows_fit, ~ predict(.x, test, type = "prob")))
-```
 
-```
-## Error: Problem with `mutate()` column `class_predict`.
-## ℹ `class_predict = map(wflows_fit, ~predict(.x, test))`.
-## ✖ 'what' must be a function or character string
-```
 
-```r
 wflows_cheat %>%
   bind_cols(tribble(~id, "Neural Network", "Nearest Neighbor", "Logistic Regression", "Random Forest", "Boosted Trees")) %>%
   select(-wflow, -wflows_fit) %>%
@@ -1162,27 +1155,27 @@ res <-
       initial = res_grd,
       metrics = metric_set(roc_auc, sens, spec, j_index, accuracy))
 ## Optimizing roc_auc
-## Initial best: 0.78125
-##  1 ♥ new best           roc_auc=0.8061
-##  2 ─ discard suboptimal roc_auc=0.5707
-##  3 ◯ accept suboptimal  roc_auc=0.77357
-##  4 ─ discard suboptimal roc_auc=0.76691
-##  5 ◯ accept suboptimal  roc_auc=0.77357
-##  6 + better suboptimal  roc_auc=0.78714
-##  7 + better suboptimal  roc_auc=0.79047
-##  8 ◯ accept suboptimal  roc_auc=0.77408
-##  9 ✖ restart from best  roc_auc=0.7021
-## 10 ─ discard suboptimal roc_auc=0.64882
-## 11 ♥ new best           roc_auc=0.82659
-## 12 ─ discard suboptimal roc_auc=0.79867
-## 13 ◯ accept suboptimal  roc_auc=0.7897
-## 14 ◯ accept suboptimal  roc_auc=0.77408
-## 15 ─ discard suboptimal roc_auc=0.51921
-## 16 ─ discard suboptimal roc_auc=0.70261
-## 17 + better suboptimal  roc_auc=0.77766
-## 18 + better suboptimal  roc_auc=0.79201
-## 19 ✖ restart from best  roc_auc=0.77152
-## 20 ◯ accept suboptimal  roc_auc=0.81916
+## Initial best: 0.78996
+##  1 ◯ accept suboptimal  roc_auc=0.74385
+##  2 ◯ accept suboptimal  roc_auc=0.69237
+##  3 ◯ accept suboptimal  roc_auc=0.66214
+##  4 + better suboptimal  roc_auc=0.67367
+##  5 ◯ accept suboptimal  roc_auc=0.67188
+##  6 ─ discard suboptimal roc_auc=0.6647
+##  7 ◯ accept suboptimal  roc_auc=0.6583
+##  8 ✖ restart from best  roc_auc=0.66342
+##  9 ◯ accept suboptimal  roc_auc=0.76537
+## 10 ─ discard suboptimal roc_auc=0.74129
+## 11 ─ discard suboptimal roc_auc=0.71875
+## 12 ◯ accept suboptimal  roc_auc=0.74027
+## 13 ♥ new best           roc_auc=0.80328
+## 14 ─ discard suboptimal roc_auc=0.76383
+## 15 ─ discard suboptimal roc_auc=0.78151
+## 16 ─ discard suboptimal roc_auc=0.771
+## 17 ─ discard suboptimal roc_auc=0.76076
+## 18 ─ discard suboptimal roc_auc=0.78381
+## 19 ♥ new best           roc_auc=0.81916
+## 20 ─ discard suboptimal roc_auc=0.7687
 ```
 
 
@@ -1192,14 +1185,14 @@ res %>% show_best(metric = "roc_auc")
 
 ```
 ## # A tibble: 5 × 10
-##   trees tree_depth learn_rate .metric .estimator  mean     n std_err
-##   <int>      <int>      <dbl> <chr>   <chr>      <dbl> <int>   <dbl>
-## 1  1006          3    0.00711 roc_auc binary     0.827     1      NA
-## 2  1006          2    0.0118  roc_auc binary     0.819     1      NA
-## 3   814          3    0.00379 roc_auc binary     0.806     1      NA
-## 4  1170          1    0.0510  roc_auc binary     0.799     1      NA
-## 5  1395          5    0.0133  roc_auc binary     0.792     1      NA
-## # … with 2 more variables: .config <chr>, .iter <int>
+##   trees tree_depth learn_rate .metric .estimator  mean     n std_err .config    
+##   <int>      <int>      <dbl> <chr>   <chr>      <dbl> <int>   <dbl> <chr>      
+## 1  1939          2   0.00552  roc_auc binary     0.819     1      NA Iter19     
+## 2  1807          4   0.00273  roc_auc binary     0.803     1      NA Iter13     
+## 3  1701          7   0.000408 roc_auc binary     0.790     1      NA initial_Pr…
+## 4  1703          5   0.000617 roc_auc binary     0.784     1      NA Iter18     
+## 5  2000          5   0.000264 roc_auc binary     0.782     1      NA Iter15     
+## # … with 1 more variable: .iter <int>
 ```
 
 ```r
@@ -1313,7 +1306,7 @@ trained_wf <-
 ```
 
 ```
-## [11:41:34] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [14:34:13] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 Now, we can create a tribble "tests" out of these 4 testing sets. First, we compare the accuracy for both known clients and unknown clients prediction for these 4 months using the forecasted deaths. 
@@ -1845,19 +1838,19 @@ calib_tbl %>%
 
 ```
 ## # A tibble: 2,460 × 10
-##    .model_id .model_desc .type client    mae  mape   mase smape   rmse
-##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>
-##  1         1 RANGER      Test  1        4.92 Inf    15.4  156.    5.30
-##  2         1 RANGER      Test  10      57.3  333.   17.4  108.   58.6 
-##  3         1 RANGER      Test  100      4.75  38.9   2.51  51.0   6.39
-##  4         1 RANGER      Test  101      4.30 191.    3.32  81.7   4.71
-##  5         1 RANGER      Test  102      2.46 Inf   Inf    200     2.50
-##  6         1 RANGER      Test  103      1.30 155.    1.51  64.8   1.75
-##  7         1 RANGER      Test  104    262.   Inf   125.   173.  310.  
-##  8         1 RANGER      Test  105     30.6  313.   16.4  109.   34.8 
-##  9         1 RANGER      Test  106     19.4   93.9   7.67  56.7  24.2 
-## 10         1 RANGER      Test  107      4.05  49.1   2.12  68.4   6.52
-## # … with 2,450 more rows, and 1 more variable: rsq <dbl>
+##    .model_id .model_desc .type client    mae  mape   mase smape   rmse     rsq
+##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>   <dbl>
+##  1         1 RANGER      Test  1        4.92 Inf    15.4  156.    5.30  0.411 
+##  2         1 RANGER      Test  10      57.3  333.   17.4  108.   58.6   0.126 
+##  3         1 RANGER      Test  100      4.75  38.9   2.51  51.0   6.39  0.384 
+##  4         1 RANGER      Test  101      4.30 191.    3.32  81.7   4.71  0.333 
+##  5         1 RANGER      Test  102      2.46 Inf   Inf    200     2.50 NA     
+##  6         1 RANGER      Test  103      1.30 155.    1.51  64.8   1.75  0.610 
+##  7         1 RANGER      Test  104    262.   Inf   125.   173.  310.    0.385 
+##  8         1 RANGER      Test  105     30.6  313.   16.4  109.   34.8   0.0498
+##  9         1 RANGER      Test  106     19.4   93.9   7.67  56.7  24.2   0.0835
+## 10         1 RANGER      Test  107      4.05  49.1   2.12  68.4   6.52  0.0691
+## # … with 2,450 more rows
 ```
 
 ```r
@@ -1868,19 +1861,19 @@ calib_tbl1 %>%
 
 ```
 ## # A tibble: 2,460 × 10
-##    .model_id .model_desc .type client    mae  mape   mase smape   rmse
-##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>
-##  1         1 RANGER      Test  1       11.5  Inf    36.1  175.   13.8 
-##  2         1 RANGER      Test  10      59.6  339.   18.1  110.   61.4 
-##  3         1 RANGER      Test  100      6.74  68.8   3.56  61.3   8.04
-##  4         1 RANGER      Test  101      5.63 219.    4.35  84.9   7.00
-##  5         1 RANGER      Test  102      2.12 Inf   Inf    200     2.16
-##  6         1 RANGER      Test  103      1.67 198.    1.94  70.5   2.30
-##  7         1 RANGER      Test  104    240.   Inf   115.   168.  294.  
-##  8         1 RANGER      Test  105     32.3  325.   17.3  113.   36.9 
-##  9         1 RANGER      Test  106     21.8  107.    8.62  64.3  26.8 
-## 10         1 RANGER      Test  107      3.98  49.0   2.09  68.3   6.44
-## # … with 2,450 more rows, and 1 more variable: rsq <dbl>
+##    .model_id .model_desc .type client    mae  mape   mase smape   rmse      rsq
+##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>    <dbl>
+##  1         1 RANGER      Test  1       11.5  Inf    36.1  175.   13.8   0.412  
+##  2         1 RANGER      Test  10      59.6  339.   18.1  110.   61.4   0.165  
+##  3         1 RANGER      Test  100      6.74  68.8   3.56  61.3   8.04  0.0142 
+##  4         1 RANGER      Test  101      5.63 219.    4.35  84.9   7.00  0.544  
+##  5         1 RANGER      Test  102      2.12 Inf   Inf    200     2.16 NA      
+##  6         1 RANGER      Test  103      1.67 198.    1.94  70.5   2.30  0.602  
+##  7         1 RANGER      Test  104    240.   Inf   115.   168.  294.    0.333  
+##  8         1 RANGER      Test  105     32.3  325.   17.3  113.   36.9   0.0476 
+##  9         1 RANGER      Test  106     21.8  107.    8.62  64.3  26.8   0.0622 
+## 10         1 RANGER      Test  107      3.98  49.0   2.09  68.3   6.44  0.00413
+## # … with 2,450 more rows
 ```
 
 ```r
@@ -1891,19 +1884,19 @@ calib_tbl2 %>%
 
 ```
 ## # A tibble: 2,460 × 10
-##    .model_id .model_desc .type client    mae  mape   mase smape   rmse
-##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>
-##  1         1 RANGER      Test  1        2.56 Inf     8.03 129.    2.79
-##  2         1 RANGER      Test  10      63.9  353.   19.4  114.   64.8 
-##  3         1 RANGER      Test  100      5.20  43.4   2.75  58.8   6.74
-##  4         1 RANGER      Test  101      4.01 148.    3.09  78.3   4.65
-##  5         1 RANGER      Test  102      3.04 Inf   Inf    200     3.10
-##  6         1 RANGER      Test  103      1.66 175.    1.92  77.5   2.28
-##  7         1 RANGER      Test  104    249.   Inf   119.   173.  294.  
-##  8         1 RANGER      Test  105     24.2  253.   13.0  102.   26.9 
-##  9         1 RANGER      Test  106     13.3   65.8   5.27  51.1  15.1 
-## 10         1 RANGER      Test  107      4.31  53.5   2.26  79.6   6.56
-## # … with 2,450 more rows, and 1 more variable: rsq <dbl>
+##    .model_id .model_desc .type client    mae  mape   mase smape   rmse      rsq
+##        <int> <chr>       <chr> <fct>   <dbl> <dbl>  <dbl> <dbl>  <dbl>    <dbl>
+##  1         1 RANGER      Test  1        2.56 Inf     8.03 129.    2.79  0.314  
+##  2         1 RANGER      Test  10      63.9  353.   19.4  114.   64.8   0.442  
+##  3         1 RANGER      Test  100      5.20  43.4   2.75  58.8   6.74  0.476  
+##  4         1 RANGER      Test  101      4.01 148.    3.09  78.3   4.65  0.123  
+##  5         1 RANGER      Test  102      3.04 Inf   Inf    200     3.10 NA      
+##  6         1 RANGER      Test  103      1.66 175.    1.92  77.5   2.28  0.00315
+##  7         1 RANGER      Test  104    249.   Inf   119.   173.  294.    0.398  
+##  8         1 RANGER      Test  105     24.2  253.   13.0  102.   26.9   0.124  
+##  9         1 RANGER      Test  106     13.3   65.8   5.27  51.1  15.1   0.148  
+## 10         1 RANGER      Test  107      4.31  53.5   2.26  79.6   6.56  0.721  
+## # … with 2,450 more rows
 ```
 
 
@@ -2326,5 +2319,94 @@ As noted above, a new model  is naturally expected to give even better outcomes 
 
 ## R scripts
 
+`data/zip3_rel.R`: generates `data/zip3_rel.feather`. Depends on
+
+ * `data/zcta_county_rel_10.txt`
+
+`data/deaths.R`: generates `data/deaths_zip3.feather`. Depends on
+
+ * `data/zip3_rel.feather`, generated by `data/zip3_rel.R`
+ * `data/covid_deaths_usafacts.csv`
+
+`data/census.R`: generates `data/pop_den.feather`.
+
+ * Requires an API key
+
+`data/all_persons.r`: generates `data/simulation_data/all_persons.feather`. Depends on
+
+ * `data/simulation_data/experience_weekly_{n}.RDS`, where n = 1,...,10
+ * `data/simulation_data/person_{n}.RDS`, where n = 1,...,10
+ * `data/soa_base_2017.csv`
+
+`data/wrangling.Rmd`: generates `data/data.feather`. Depends on
+
+ * `data/Population_Estimates.csv`
+ * `data/COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv`
+ * `data/Provisional_COVID-19_Death_Counts_in_the_United_States_by_County.csv`
+ * `data/Education_Estimates.csv`
+ * `data/Poverty_Estimates.csv`
+ * `data/Unemployment_Estimates.csv`
+ * `data/Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv`
+ * `data/countypres_2000-2020.csv`
+ * `data/zip3_rel.feather`, generated by `data/zip3_rel.R`
+
+`data/processed_data.r`: generates `data/processed_data_20_12_24.feather`. Depends on
+
+ * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
+ * `data/data.feather`, generated by `data/wrangling.Rmd`
+ * `data/deaths_zip3.feather`, generated by `data/deaths.R`
+ * `data/state.txt`
+ * `data/zcta_county_rel_10.txt`
+ * `data/2020_12_23/reference_hospitalization_all_locs.csv`
+
 ## Rmd files
+
+`report.Rmd`: this file. Depends on
+
+ * `data/processed_data_20_12_23.feather`, generated by `data/processed_data.r`
+ * `calibwithIHME.rds`, Google Drive
+ * `calibwithzipdeaths.rds`, Google Drive
+ * `calibwithoutdeaths.rds`, Google Drive
+ * `resultwithIHME.rds`, Google Drive
+ * `resultwithzipdeaths.rds`, Google Drive
+ * `resultwithoutdeaths.rds`, Google Drive
+
+`time.Rmd`: work on time-dependent models. Depends on
+
+ * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
+ * `data/data.feather`, generated by `data/wrangling.Rmd`
+ * `data/deaths_zip3.feather`, generated by `data/deaths.R`
+ * `data/state.txt`, Google Drive
+ * `data/zcta_county_rel_10.txt`, Google Drive
+ * `data/2020_12_23/reference_hospitalization_all_locs.csv`, Google Drive
+ * `data/process.feather`, generated by TODO
+
+`baseline_models.Rmd`: work on time-independent models. Depends on
+
+ * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
+ * `data/data.feather`, generated by `data/wrangling.Rmd`
+
+`comparing_time_models.Rmd`: work on ???? (TODO: samara). Depends on
+
+ * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
+ * `data/data.feather`, generated by `data/wrangling.Rmd`
+ * `data/deaths_zip3.feather`, generated by `data/deaths.R`
+
+`final.Rmd`: final presentation plots. Depends on
+
+ * `data/processed_data_20_12_23.feather`, generated by `data/processed_data.r`
+
+`presentation_2.Rmd`: technical presentation plots. Depends on
+
+ * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
+ * `data/data.feather`, generated by `data/wrangling.Rmd`
+
+`random_forest.Rmd`: early work on random forest models
+
+ * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
+ * `data/data.feather`, generated by `data/wrangling.Rmd`
+
+`logistic_regression(monthly ae).Rmd`: ??? TODO! (delete?)
+
+`logistic_regression_attempt_1.Rmd`: ??? TODO! (delete?)
 
