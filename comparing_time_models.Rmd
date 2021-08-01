@@ -292,11 +292,11 @@ data_tsibble <-
 # split <- splits %>% pluck(1, 3)
 # train <- training(split) %>% unnest(data)
 # test <- testing(split) %>% unnest(data)
-train <-
+train_old <-
   processed_data %>%
   filter(date <= "2021-01-01")
 
-test <-
+test_old <-
   processed_data %>%
   filter(date > "2021-01-01" & date <= "2021-06-01")
 ```
@@ -306,11 +306,12 @@ Here we will manually forecast future `zip_deaths` using a fully default ARIMA f
 We plot total deaths vs total forecasted deaths (in the zip codes of our clients). It's not great but it's something...
 ```{r cache = TRUE}
 forecast <-
-  train %>%
+  train_old %>%
   filter(date >= "2020-03-15") %>%
   as_tsibble(index = date, key = client) %>%
-  model(arima = ARIMA(zip_deaths)) %>%
-  forecast(h = "6 months")
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
 
 foo <-
   forecast %>%
@@ -326,7 +327,7 @@ bar <-
 foo %>%
   left_join(bar, by = "date") %>%
   ggplot(aes(x = date)) + geom_line(aes(y = fc_deaths), color = "red") + geom_line(aes(y = true_deaths))
-```
+
 
 Common recipe for all models. 
 
@@ -443,14 +444,18 @@ wflows <- tribble(~wflow ,
 
 wflows <-
   wflows %>%
-  mutate(wflows_fit = map(wflow, ~ fit(.x, train)))
+  mutate(wflows_fit = map(wflow, ~ fit(.x, train_old)))
+```
 
+```{r}
 wflows <-
   wflows %>%
   mutate(
-    class_predict = map(wflows_fit, ~ predict(.x, test)),
-    prob_predict = map(wflows_fit, ~ predict(.x, test, type = "prob")))
+    class_predict = map(wflows_fit, ~ predict(.x, test_old),
+    prob_predict = map(wflows_fit, ~ predict(.x, test_old, type = "prob"))))
+```    
 
+```{r}
 wflows %>%
   bind_cols(tribble(~id, "knn", "log", "forest", "bt")) %>%
   select(-wflow, -wflows_fit) %>%

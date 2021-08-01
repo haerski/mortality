@@ -1,6 +1,5 @@
 
 
-
 # Executive summary
 
 # Data wrangling
@@ -24,11 +23,11 @@ Filename | Source | Description
 ---------|--------|------------
 `covid_deaths_usafacts.csv` | [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/) | Cumulative weekly COVID-19 deaths by county
 `soa_base_2017.csv` | (Sent by Douglas Armstrong) | $q_x$ values by gender, age, industry
-`Population_Estimates.csv` | USDA ERS | ???
+`Population_Estimates.csv` | USDA ERS | Population estimates of the U.S., states and counties, 2019
 `COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | ??? | ???  
-`Education_Estimates.csv` | USDA ERS | ???
-`Poverty_Estimates.csv` | USDA ERS | ???
-`Unemployment_Estimates.csv` | USDA ERS | ???
+`Education_Estimates.csv` | USDA ERS | Educational attainment for adults age 25 and older for the U.S., states and counties, 2015-19
+`Poverty_Estimates.csv` | USDA ERS | Poverty rates in the U.S., states and counties, 2019
+`Unemployment_Estimates.csv` | USDA ERS | Unemployment rates, 2019 and 2020; median househould income, 2019. States and counties
 `Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv` | [CDC](https://catalog.data.gov/dataset/vaccine-hesitancy-for-covid-19-county-and-local-estimates) | Vaccine hesitancy estimates for COVID-19
 `countypres_2000-2020.csv` | [MIT Election Data + Science Lab](https://dataverse.harvard.edu/file.xhtml?fileId=4819117&version=9.0) | Election data by county (only 2020 used)
 `zcta_county_rel_10.txt` | [US Census Bureau](https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2010.html#par_textimage_674173622) | Zip code to county relationship file (2010)
@@ -182,6 +181,10 @@ The dependency tree is outlined in the Appendix (TODO!!!)
 After merging, this gives us a final dataset of 492 clients over 118 weeks ranging from Jan 1st 2019 to June 27th 2021.
 We make two separate tibbles.
 
+
+
+
+
 ```r
 weekly_data <-
   read_feather("data/processed_data_20_12_23.feather") %>%
@@ -273,7 +276,7 @@ library(tidymodels)
 
 ## Feature engineering
 Our mentor's hypothesis was that the AE for 2019 was not a good predictor for client risk during a pandemic.
-To test this hypothesis, we train and test a selection of models, some with 2019 AE as a preictor, and some without.
+To test this hypothesis, we train and test a selection of models, some with 2019 AE as a predictor, and some without.
 
 We start with a recipe, which defines our model formulas and data preprocessing steps.
 We remove all categorical predictors and all variables that are not available before 2020.
@@ -353,7 +356,10 @@ crossval <- vfold_cv(training(init), strata = adverse)
 
 Our workflowset will contain the 16 combinations of the 8 model specifications and 2 recipes.
 We train each one on the 10 cross-validation splits, and assess the results using the area under the ROC (`roc_auc`).
-(Sidenote: we use `xfun::cache_rds` to cache lengthy lines. The resulting `.rds` files can be downloaded from the data repository).
+
+
+
+
 
 ```r
 models <- list(Logistic = log_spec,
@@ -376,36 +382,446 @@ fit_wflows <-
                    metrics = metric_set(roc_auc, accuracy))
 ```
 
-```
-## Error: 
-## The combination of metric functions must be:
-## - only numeric metrics
-## - a mix of class metrics and class probability metrics
-## 
-## The following metric function types are being mixed:
-## - prob (roc_auc)
-## - other (accuracy <namespace:fabletools>)
-```
+We now look at the results with and without the 2019 AE as a predictor
 
-```
-## Execution stopped; returning current results
+```r
+fit_wflows %>%
+  collect_metrics() %>%
+  separate(wflow_id, into = c("rec", "mod"), sep = "_", remove = FALSE) %>%
+  ggplot(aes(x = rec, y = mean, color = mod, group = mod)) +
+  geom_point() + geom_line() + facet_wrap(~ factor(.metric)) +
+  labs(color = "Model", x = NULL, y = "Value", title = "Performance of models with/without 2019 data")
 ```
 
+![plot of chunk unnamed-chunk-16](figures/report/fig-unnamed-chunk-16-1.png)
+
+The performance with 2019 AE as a predictor is equal or worse than not using it.
+Thus in the following we use the recipe where 2019 AE is removed.
+We note that the above analysis was done with models with default hyperparameters.
+It is certainly possible that some methods would have seen benefits from tuning.
+
+## Model selection
+With our data preprocessing locked in, we turn to model selection next.
+We will look at five models, each with 10 different hyperparameters.
+
+```r
+tune_log_spec <-
+  logistic_reg(penalty = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+tune_forest_spec <-
+  rand_forest(trees = 1000, mtry = tune(), min_n = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tune_sln_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+tune_svm_rbf_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+tune_knn_spec <-
+  nearest_neighbor(neighbors = tune(), dist_power = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+models <- list(`Logistic` = tune_log_spec,
+               `Random forest` = tune_forest_spec,
+               `Neural network` = tune_sln_spec,
+               `SVM RBF` = tune_svm_rbf_spec,
+               `KNN` = tune_knn_spec)
+recipes <- list(no2019)
+wflows <- workflow_set(recipes, models)
+```
+
+For each model, the 10 tuning parameters will be automatically selected using a latin hypercube. See the documentation of `dials::grid_latin_hypercube` for implementation details.
+Again, performance will be evaluated by 10-fold crossvalidation.
+
+```r
+results <-
+  wflows %>%
+  workflow_map(resamples = crossval,
+               grid = 10,
+               metrics = metric_set(roc_auc, accuracy),
+               control = control_grid(save_pred = TRUE),
+               seed = 828282)
+## i Creating pre-processing data to finalize unknown parameter: mtry
+```
+
+The results below suggest that the random forest is performing the best, especially in terms of the area under ROC.
+We will thus choose it for further tuning.
+
+```r
+autoplot(results)
+```
+
+![plot of chunk unnamed-chunk-18](figures/report/fig-unnamed-chunk-18-1.png)
+
+## Tuning a random forest
+Since we've chosen a random forest, we no longer need to normalize our predictors.
+This will make model explanation easier later on.
+We wrap the recipe and model specification into a workflow.
+
+```r
+forest_rec <-
+  recipe(adverse ~ ., data = yearly_data) %>%
+  step_rm(all_nominal_predictors()) %>%
+  step_rm(ae_2020, ae_2021, actual_2019, actual_2020, actual_2021) %>%
+  step_zv(all_predictors()) %>%
+  step_rm(ae_2019)
+
+forest_wflow <-
+  workflow() %>%
+  add_model(tune_forest_spec) %>%
+  add_recipe(forest_rec)
+```
+
+We have two tunable hyperparameters: `min_n`, the minimal number of datapoints required for a node to split, and `mtry`, the number of randomly selected predictors in each tree.
+We fix the number of trees to 1000, and we set the tuning range of `mtry` to be between 1 and 20.
+Tuning will happen on a regular, 10 x 10 grid.
 
 
+```r
+forest_params <-
+  forest_wflow %>%
+  parameters() %>%
+  update(mtry = mtry(c(1, 20)))
 
-## Methods
+forest_grid <-
+  grid_regular(forest_params, levels = 10)
+```
 
-## Results
+```r
+forest_tune <-
+  forest_wflow %>%
+  tune_grid(
+      resamples = crossval,
+      grid = forest_grid,
+      metrics = metric_set(roc_auc, accuracy)
+  )
+```
+
+The tuning results are below.
+We choose a set of parameters whose `roc_auc` is high. In this case, we choose `mtry = 5`, `min_n = 6`. The command `finalize_workflow` applies these parameters and returns a tuned workflow.
+
+```r
+autoplot(forest_tune)
+```
+
+![plot of chunk unnamed-chunk-21](figures/report/fig-unnamed-chunk-21-1.png)
+
+```r
+best_params <- list(mtry = 5, min_n = 6)
+final_forest <-
+  forest_wflow %>%
+  finalize_workflow(best_params)
+```
+
+## Thresholding
+At the moment, our forest classifies each client by predicting the probability of belonging to the "high risk" class. If that probability is greater than 0.5, the final classification will be "high risk", if not, the final classification will be "low risk".
+
+By changing the threshold from 0.5 to something else, we can influence the number of false positives or false negatives. This is important, since false positives and false negatives have different financial impacts for the insurer.
+For example, a false positive would unfairly label a customer as high-risk when in reality they are not. Such a misclassification may lead to loss of profitable clients. On the other hand, a false negative might lead to mismanagement of risk due to exessive claims.
+
+We can study the effect of different thresholds using the package `probably`.
+For each of our 10 cross-validation sets, we train a random forest using the optimal parameters found above, and predict using 101 threshold values between 0 and 1.
+The function `probably::threshold_perf` will compute seveal metrics, but we plot only sensitivity, specificity, and j-index.
+These are averaged over the 10 crossvalidation sets.
+
+
+```r
+library(probably)
+
+forest_resamples <-
+  final_forest %>%
+  finalize_workflow(best_params) %>%
+  fit_resamples(
+      resamples = crossval,
+      control = control_resamples(save_pred = TRUE)
+  )
+
+forest_resamples <-
+  forest_resamples %>%
+  rowwise() %>%
+  mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
+
+my_threshold <- 0.67
+
+forest_resamples %>%
+  select(thr_perf, id) %>%
+  unnest(thr_perf) %>%
+  group_by(.threshold, .metric) %>%
+  summarize(estimate = mean(.estimate)) %>%
+  filter(.metric != "distance") %>%
+  ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line() +
+  geom_vline(xintercept = my_threshold, linetype = "dashed") +
+  labs(x = "Threshold", y = "Estimate", color = "Metric", title = "Sensitivity and specificity by threshold")
+```
+
+```
+## `summarise()` has grouped output by '.threshold'. You can override using the `.groups` argument.
+```
+
+![plot of chunk unnamed-chunk-22](figures/report/fig-unnamed-chunk-22-1.png)
+
+Some expertise and business intuition is required in order to determine the desired threshold value.
+Due to a lack of time and resources, we decided to choose a threshold value that would simultaneously optimize for sensitivity and specificity. To that extent, we choose the threshold value of 0.67.
+
+## Final results
+With all the parameters chosen, we can finally train our random forest on the whole training set, and test it on the test set. We add to the testing set our probabilities.
+
+```r
+trained_forest <-
+  final_forest %>%
+  fit(training(init))
+
+thresholded_predictions <-
+  trained_forest %>%
+  predict(testing(init), type = "prob") %>%
+  mutate(class_pred =
+            make_two_class_pred(
+                  `.pred_ae > 3`,
+                  levels = levels(yearly_data$adverse),
+                  threshold = my_threshold)) %>%
+  bind_cols(testing(init))
+```
+
+We can now compute a confusion matrix and some summary statistics. Note that we have 124 clients in the testing set, of which 74% are high risk (`ae > 3`). This is the No Information Rate.
+
+```r
+confusion_matrix <-
+  thresholded_predictions %>%
+  conf_mat(adverse, class_pred)
+
+confusion_matrix %>% autoplot(type = "heatmap")
+```
+
+![plot of chunk unnamed-chunk-24](figures/report/fig-unnamed-chunk-24-1.png)
+
+```r
+confusion_matrix %>% summary()
+```
+
+```
+## # A tibble: 13 × 3
+##    .metric              .estimator .estimate
+##    <chr>                <chr>          <dbl>
+##  1 accuracy             binary         0.839
+##  2 kap                  binary         0.603
+##  3 sens                 binary         0.859
+##  4 spec                 binary         0.781
+##  5 ppv                  binary         0.919
+##  6 npv                  binary         0.658
+##  7 mcc                  binary         0.607
+##  8 j_index              binary         0.640
+##  9 bal_accuracy         binary         0.820
+## 10 detection_prevalence binary         0.694
+## 11 precision            binary         0.919
+## 12 recall               binary         0.859
+## 13 f_meas               binary         0.888
+```
+
 
 
 # Short-term model
 
 ## Intro
 
+Now that we have introduced the long-term model and presented its results, we can move to the next step: integrating the time factor. To do this, we will be using the weekly_data through all this section. 
+
+
+```r
+weekly_data
+```
+
+```
+## # A tibble: 58,056 × 35
+##    zip3  date       client claims zip_deaths smoothed_ae shrunk_ae class   smoothed_deaths  size  volume  avg_qx avg_age per_male per_blue_collar expected  nohs    hs college bachelor
+##    <chr> <date>     <chr>   <dbl>      <dbl>       <dbl>     <dbl> <fct>             <dbl> <int>   <dbl>   <dbl>   <dbl>    <dbl>           <dbl>    <dbl> <dbl> <dbl>   <dbl>    <dbl>
+##  1 015   2019-03-31 397    355675          0       0.861     0.775 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  2 015   2019-04-07 397    118900          0       1.06      0.952 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  3 015   2019-04-14 397         0          0       0.959     0.864 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  4 015   2019-04-21 397         0          0       0.821     0.740 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  5 015   2019-04-28 397    141450          0       0.954     0.859 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  6 015   2019-05-05 397         0          0       0.785     0.707 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  7 015   2019-05-12 397         0          0       0.615     0.554 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  8 015   2019-05-19 397         0          0       0.460     0.414 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+##  9 015   2019-05-26 397    372075          0       1.10      0.987 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+## 10 015   2019-06-02 397         0          0       0.967     0.871 Not ad…               0  9549  1.71e9 0.00272    40.7    0.671               1 4623759.  9.33  27.8    26.6     36.3
+## # … with 58,046 more rows, and 15 more variables: R_birth <dbl>, R_death <dbl>, unemp <dbl>, poverty <dbl>, per_dem <dbl>, hes <dbl>, hes_uns <dbl>, str_hes <dbl>, svi <dbl>,
+## #   cvac <dbl>, income <dbl>, POP <dbl>, density <dbl>, ae <dbl>, ihme_deaths <dbl>
+```
+
 ## Methods
 
+We first start by dividing our timeline into training and testing sets: we take all the dates before January 1 2021 as our training set and all the dates from January 1 2021 to April 1 2021 as our test set (so 4 months later). Our goal is to try and use the data from our clients' performance before January 1 to predict their performance after this date. 
+
+
+```r
+train <-
+  weekly_data %>%
+  filter(date <= "2021-01-01")
+
+test <-
+  weekly_data %>%
+  filter(date > "2021-01-01" & date <= "2021-04-01")
+```
+
+That are two mains things that set this model apart from the long term model introduced in the first section. First, the AE is updated weekly as opposed to the long term model where the AE is taken yearly. Second, we are adding weekly deaths as one of the predictors in addition to the variables introduced in the long term model. Now, that we have a clear understanding of the predictors in the short term model, the question that arises is how we can use the weekly deaths in the testing time (since such information won't be available for us in the "future"). To solve this issue, we decided to forecast the deaths for this "future" period: so we will use the weekly deaths from March 2020 to January 2021 and forecast the weekly deaths 4 months later. To do so, we will use the fully defaulted ARIMA forecaster. 
+
+
+We will be using 
+
+```r
+library(fable)
+library(tsibble)
+```
+
+
+```r
+forecast <-
+  weekly_data %>%
+  filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+```
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+
+## Warning in sqrt(diag(best$var.coef)): NaNs produced
+```
+
+We create a new set called "forecasted_test" out of our testing set where we replace "smoothed_deaths" by "forecasted_deaths".
+
+
+```r
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-smoothed_deaths) %>%
+  rename(smoothed_deaths = .mean)
+```
+
+Now, the awaited part! We are ready to introduce our modeling strategy! 
+
+We first start by introducing a common recipe that we will use for all our models. Our target variable is class, we use all the predictors in weekly_data except for client, zip3, claims, smoothed_ae, shrunk_ae, ae, zip_deaths, ihme_deaths and date. We normalize all predictors and we apply log to both Volume of the client and Population of the zip code.  
+
+```r
+common_recipe <-
+  recipe(class ~ ., data = weekly_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae,  ae, zip_deaths, ihme_deaths, date) %>%
+  step_zv(all_predictors()) %>%
+  step_log(volume, POP) %>%
+  step_normalize(all_predictors())
+```
+
+Now, that we have our recipe, we are ready to try out different models and report the results. Let us introduce the six models and then we will talk a little bit about each one of them. 
+
+
+```r
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+log_spec <- 
+  logistic_reg(
+  mode = "classification",
+  engine = "glm")
+
+svm_lin_spec <-
+  svm_linear() %>%
+  set_engine("LiblineaR") %>%
+  set_mode("classification")
+
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+sln_spec <-
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
+  set_engine("keras", verbose=0) %>%
+  set_mode("classification")
+
+
+bt_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = 100)
+```
+
+We use Random Forest (forest), Logistic Regression (log), SVM (linear kernel), Nearest Neighbor (knn), Neural Network with single layer (sln) and Boosted Trees (bt) respectively with the default setting. For the Random Forest, we consider 1000 trees and for the Boosted Trees, we take 100 trees. All of these models use different engines introduced in tidymodels, and they are all set to mode=classficiation. 
+
+We then create the workflow for the six models mentioned above with the recipe taken to be the "common recipe" and the model taken to be the ones introduced in the previous chunk. 
+
+
+```r
+bt_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(bt_spec)
+
+log_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(log_spec)
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(forest_spec)
+
+svm_lin_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(svm_lin_spec)
+
+knn_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(knn_spec)
+
+sln_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(sln_spec)
+```
+
+
+
 ## Results
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Model we tried and did not work
 In this section, we introduce the model we tried and did not work.
@@ -415,22 +831,21 @@ We want to predict the `AE value` for each client for each week during COVID-19.
 Our main package is `Modeltime`, which consists time series models and machine learning. Since we have more than 500 clients, we have more than 500 time series. Practically, we will have more clients. We create a global machine learning model that forecasts all clients at once for computational efficiency. 
 
 We use data before Covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees) as our predictors. And we compare results with IHME death data/with zip death data/without death data. 
-
 Necessary package we need. 
 
 ```r
-library(tidyverse)
-library(tidymodels)
-library(modeltime)
-library(timetk)
-library(probably)
-library(themis)
-library(feather)
-library(magrittr)
-library(skimr)
-library(vip)
-library(dplyr)
-library(lubridate)
+# library(tidyverse)
+# library(tidymodels)
+# library(modeltime)
+# library(timetk)
+# library(probably)
+# library(themis)
+# library(feather)
+# library(magrittr)
+# library(skimr)
+# library(vip)
+# library(dplyr)
+# library(lubridate)
 ```
 *Read data and pre-processing*
 
@@ -450,6 +865,17 @@ Split our data into two part: train set (`2020-03-15` to `2020-12-27`) and test 
 ```r
   set.seed(1234)
   splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
+```
+
+```
+## Data is not ordered by the 'date_var'. Resamples will be arranged by `date`.
+```
+
+```
+## Overlapping Timestamps Detected. Processing overlapping time series together using sliding windows.
+```
+
+```r
   train = training(splits)
   test = testing(splits)
 ```
@@ -494,6 +920,10 @@ model_tbl <- readRDS("modelwithIHME.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'modelwithIHME.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
@@ -502,11 +932,19 @@ model_tbl1 <- readRDS("modelwithzipdeath.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'modelwithzipdeath.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
 ```r
 model_tbl2 <- readRDS("modelwithoutdeath.rds")
+```
+
+```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'modelwithoutdeath.rds', probable reason 'No such file or directory'
 ```
 
 ```
@@ -521,6 +959,10 @@ calib_tbl <- readRDS("calibwithIHME.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'calibwithIHME.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
@@ -529,11 +971,19 @@ calib_tbl1 <- readRDS("calibwithzipdeath.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'calibwithzipdeath.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
 ```r
 calib_tbl2 <- readRDS("calibwithoutdeath.rds")
+```
+
+```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'calibwithoutdeath.rds', probable reason 'No such file or directory'
 ```
 
 ```
@@ -597,6 +1047,10 @@ result <- readRDS("resultwithIHME.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'resultwithIHME.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
@@ -605,11 +1059,19 @@ result1 <- readRDS("resultwithzipdeath.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'resultwithzipdeath.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
 ```r
 result2 <- readRDS("resultwithoutdeath.rds")
+```
+
+```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'resultwithoutdeath.rds', probable reason 'No such file or directory'
 ```
 
 ```
@@ -791,6 +1253,10 @@ predclaim <- readRDS("predclaimwithIHME.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'predclaimwithIHME.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
@@ -799,11 +1265,19 @@ predclaim1 <- readRDS("predclaimwithzipdeath.rds")
 ```
 
 ```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'predclaimwithzipdeath.rds', probable reason 'No such file or directory'
+```
+
+```
 ## Error in gzfile(file, "rb"): cannot open the connection
 ```
 
 ```r
 predclaim2 <- readRDS("predclaimwithoutdeath.rds")
+```
+
+```
+## Warning in gzfile(file, "rb"): cannot open compressed file 'predclaimwithoutdeath.rds', probable reason 'No such file or directory'
 ```
 
 ```
@@ -958,7 +1432,6 @@ predclaim2%>%
 1. To improve accuracy, we can add feature engineering and localized model selection by time series identifier.
 
 2. We can also choose the final predicted value according to the confident interval to improve our result since the exact AE is in the overlap of 5 models.
-
 
 We predict the shrunk AE on testing set. Our model will provide with predicting shrunk AE and confidence interval. 
 # Conclusion
