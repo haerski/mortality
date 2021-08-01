@@ -855,12 +855,12 @@ spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly
 resmpl <- manual_rset(list(spl), c("foo"))
 ```
 
-Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, hime_deaths, 
+Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae.
 
 ```{r}
 xgboost_recipe <-
   recipe(formula = class ~ ., data = weekly_data) %>%
-  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, hime_deaths) %>%
+  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae) %>%
   step_zv(all_predictors())
 
 xgboost_spec <-
@@ -877,7 +877,7 @@ xgboost_workflow <-
 
 We tuned the model using the following hyperparameters: number of trees, tree depth and learning rate.  
 We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
-```{r cache = TRUE, collapse = TRUE}
+```{r short_tune_xgboost, cache = TRUE, collapse = TRUE}
 set.seed(98324)
 res_grd <-
   xgboost_workflow %>%
@@ -1423,7 +1423,7 @@ Predicted\ \ Smoothed \ \ AE = Predicted\ \  Shrunk\ \ AE / Shrinkage,\\
 Predicted\ \ weekly\ \ Claim = Predicted\ \ Smoothed \ \ AE * (Expected\ \ Yearly\ \  Claim /52.18 )
 $$
 ```{r}
-claim <- read_feather("mortality/data/processed_data_20_12_23.feather")%>%
+claim <- read_feather("data/processed_data_20_12_23.feather")%>%
   select(date, client, claims, expected, shrinkage,volume)
 ```
 ```{r}
