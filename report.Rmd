@@ -775,20 +775,6 @@ wflows_cheat %>%
 ```
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Results
 
 Comparing the models above, we can see that the Boosted Trees is the best model. So, we use it for the rest of the project, we tune it, and we report the results. 
@@ -855,7 +841,7 @@ spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly
 resmpl <- manual_rset(list(spl), c("foo"))
 ```
 
-Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, hime_deaths, 
+Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae.
 
 ```{r}
 xgboost_recipe <-
@@ -875,9 +861,9 @@ xgboost_workflow <-
 ```
 
 
-We tuned the model using the following hyperparameters: number of trees, tree depth and learning rate.  
+We tuned the model using the following hyperparameters: number of trees, tree depth and learning rate.   
 We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
-```{r cache = TRUE, collapse = TRUE}
+```{r short_tune_xgboost, cache = TRUE, collapse = TRUE}
 set.seed(98324)
 res_grd <-
   xgboost_workflow %>%
@@ -941,7 +927,7 @@ Necessary package we need.
 
 Get weeklydata from `2020-03-15` to `2021-06-27 `. 
 ```{r}
-clients<-read_feather("data/processed_data_20_12_23.feather")%>%
+clients<-read_feather("mortality/data/processed_data_20_12_23.feather")%>%
   select(-ae_2021, -ae_2020, -ae_2019,
          -actual_2021, -actual_2020, -actual_2019, -adverse,
          -STATE_NAME, -dep_var, -smoothed_ae)%>%
@@ -956,6 +942,7 @@ Split our data into two part: train set (`2020-03-15` to `2020-12-27`) and test 
   train = training(splits)
   test = testing(splits)
 ```
+
 With recipe, we can add feature engineering steps to get our data ready.
 We remove useless variables: zip3, actual claims, class, shrinkage, ae.
 For extreme big number such as `population`, `volume` and `expected`, we use `step_log()`to do logarithm transformation for pre-processing.
@@ -987,8 +974,180 @@ rec_obj2 <-
     rec_obj_alldata%>%
     step_rm( smoothed_deaths, ihme_deaths, zip_deaths)
 ```
-We are using 5 machine learning models we try in this section . `forest_spec` is random forest. `tuned_forest_spec` is tunded random forest. `svm_rbf_spec` is radial basis function support vector machines. `knn_spec` is K-nearest neighbors and `xgboost_spec` is Xgboost.
+Here are 5 machine learning models we try in this section . `forest_spec` is random forest. `tuned_forest_spec` is tunded random forest. `svm_rbf_spec` is radial basis function support vector machines. `knn_spec` is K-nearest neighbors and `xgboost_spec` is Xgboost.
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+tuned_forest_spec <-
+  rand_forest(trees = 1000, mtry = 12, min_n = 21) %>%
+  set_mode("regression")%>%
+  set_engine("ranger", num.threads = 8, importance = "impurity", seed = 123)
+svm_rbf_spec <-
+  svm_rbf() %>%
+  set_engine("kernlab") %>%
+  set_mode("regression")
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("regression")
+xgboost_spec <-
+  boost_tree(trees = 100) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+```
+*Create workflow*
 
+The workflow is an object that can bundle together our pre-processing, modeling, and post-processing requests. 
+
+Workflow with ihme death data
+```{r eval = FALSE}
+wflw_rf <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))
+
+wflw_knnspec <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+
+wflw_xgboost <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj) %>%
+    fit(data = training(splits))  
+#Create a Modeltime Table (table of model)
+model_tbl<- modeltime_table(
+    wflw_rf,
+    wflw_tunedrf,
+    wflw_svmrbf,
+    wflw_knnspec,
+    wflw_xgboost
+)
+```
+Workflow with zip death data
+```{r eval= FALSE}
+wflw_rf1 <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf1 <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf1 <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_knnspec1 <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))
+
+wflw_xgboost1 <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj1) %>%
+    fit(data = training(splits))  
+#Create a Modeltime Table
+model_tbl1 <- modeltime_table(
+    wflw_rf1,
+    wflw_tunedrf1,
+    #wflw_neural,
+    wflw_svmrbf1,
+    #wflw_svmpoly,
+    wflw_knnspec1,
+    wflw_xgboost1
+)
+```
+Workflow without  death
+```{r eval = FALSE}
+wflw_rf2 <- workflow() %>%
+    add_model(
+        forest_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))
+
+wflw_tunedrf2 <- workflow() %>%
+    add_model(
+        tuned_forest_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))
+
+wflw_svmrbf2 <- workflow() %>%
+    add_model(
+        svm_rbf_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))
+
+wflw_knnspec2 <- workflow() %>%
+    add_model(
+        knn_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits)) 
+
+wflw_xgboost2 <- workflow() %>%
+    add_model(
+        xgboost_spec
+    ) %>%
+    add_recipe(rec_obj2) %>%
+    fit(data = training(splits))  
+#Create a Modeltime Table
+model_tbl2 <- modeltime_table(
+    wflw_rf2,
+    wflw_tunedrf2,
+    wflw_svmrbf2,
+    wflw_knnspec2,
+    wflw_xgboost2
+)
+```
+For quick knit, we save the workflow here
+```{r eval = FALSE}
+#save the model table with IHME death data
+saveRDS(model_tbl, "modelwithIHME.rds")
+#save the model table with zip death data
+saveRDS(model_tbl1, "modelwithzipdeath.rds")
+#save the model table without death data
+saveRDS(model_tbl2, "modelwithoutdeath.rds")
+```
 Read the saved workflow table
 ```{r}
 model_tbl <- readRDS("modelwithIHME.rds")
@@ -997,6 +1156,35 @@ model_tbl2 <- readRDS("modelwithoutdeath.rds")
 ```
 *Preparation for forecasting*
 Calibrate the model to testing set. It will calculate accuracy and forecast confidence by computing predictions and residuals for testing set.
+```{r eval = FALSE}
+#with HIME
+calib_tbl <- model_tbl %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+#with zip death
+calib_tbl1 <- model_tbl1 %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+#without death
+calib_tbl2 <- model_tbl2 %>%
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "client"
+    )
+```
+For quick knit, we save the calibration sets here.
+```{r eval = FALSE}
+#save the model table with IHME death data
+saveRDS(calib_tbl, "calibwithIHME.rds")
+#save the model table with zip death data
+saveRDS(calib_tbl1, "calibwithzipdeath.rds")
+#save the model table without death data
+saveRDS(calib_tbl2, "calibwithoutdeath.rds")
+```
 Read the saved calibration sets.
 ```{r}
 calib_tbl <- readRDS("calibwithIHME.rds")
@@ -1033,15 +1221,62 @@ calib_tbl2 %>%
     modeltime_accuracy(acc_by_id = FALSE) %>% 
     table_modeltime_accuracy(.interactive = FALSE)
 ```
+Local error for each client
+```{r, eval = FALSE}
+#with HIME death
+calib_tbl %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+#with zip death
+calib_tbl1 %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+#without death data
+calib_tbl1 %>% 
+    modeltime_accuracy(acc_by_id = TRUE) %>% 
+    table_modeltime_accuracy(.interactive = FALSE)
+```
 *Predict*
 
+We predict the shrunk AE on testing set. Our model will provide with predicting shrunk AE and confidence interval.  
+```{r eval = FALSE}
+#with HIME death
+result <- calib_tbl %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+#with zip death
+result1 <- calib_tbl1 %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+#without death
+result2 <- calib_tbl2 %>%
+    modeltime_forecast(
+        new_data    = testing(splits),
+        actual_data = bind_rows(training(splits), testing(splits)),
+        conf_by_id  = TRUE
+    ) 
+```
+For quick knit, we save the results on testing set here.
+```{r eval = FALSE}
+#result with IHME death data 
+saveRDS(result, "resultwithIHME.rds")
+#result with zip death data
+saveRDS(result1, "resultwithzipdeath.rds")
+#result without death data
+saveRDS(result2, "resultwithoutdeath.rds")
+```
 Read the results on testing set.
 ```{r}
 result <- readRDS("resultwithIHME.rds")
 result1 <- readRDS("resultwithzipdeath.rds")
 result2 <- readRDS("resultwithoutdeath.rds")
 ```
-
 *Visualize clients forecast*
 
 We pick client `1`, `5`, `7`, `10`, `61`, `100` as examples. We add the solid line `threshold = 2.5` to help us to see whether this client meet adverse mortality event.The exact AE is in the range of confidence interval. 
@@ -1173,6 +1408,66 @@ $$
 Predicted\ \ Smoothed \ \ AE = Predicted\ \  Shrunk\ \ AE / Shrinkage,\\
 Predicted\ \ weekly\ \ Claim = Predicted\ \ Smoothed \ \ AE * (Expected\ \ Yearly\ \  Claim /52.18 )
 $$
+```{r}
+claim <- read_feather("data/processed_data_20_12_23.feather")%>%
+  select(date, client, claims, expected, shrinkage,volume)
+```
+```{r}
+predclaim<-result %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+ inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+predclaim1<-result1 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+ inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+
+predclaim2<-result2 %>%
+  select(-.model_desc, -.conf_lo, -.conf_hi, -.key) %>%
+  rename(model = .model_id, value = .value, date= .index)%>%
+  relocate(model, value, .after = client)%>%
+  pivot_wider(names_from = model, values_from =value)%>%
+  rename(actual = "NA", rf = "1", rf_tuned = "2", svm_rbd = "3", knn = "4", xgboost = "5" )%>%
+  drop_na()%>%
+ inner_join(claim, by = c("date", "client"))%>%
+  mutate(rf = rf/shrinkage *(expected /52.18),
+         rf_tuned = rf_tuned/shrinkage*(expected /52.18),
+         svm_rbd = svm_rbd /shrinkage*(expected /52.18),
+         knn = knn/shrinkage*(expected /52.18),
+         xgboost= xgboost/shrinkage*(expected / 52.18))%>%
+  select(date, client, claims,expected, rf, rf_tuned,svm_rbd,knn,xgboost)
+```
+For quick knit, we save the results on testing set here.
+```{r eval = FALSE}
+#result with IHME death data 
+saveRDS(predclaim , "predclaimwithIHME.rds")
+#result with zip death data
+saveRDS(predclaim1, "predclaimwithzipdeath.rds")
+#result without death data
+saveRDS(predclaim2, "predclaimwithoutdeath.rds")
+```
+
 Read the predicted claim result
 ```{r}
 predclaim <- readRDS("predclaimwithIHME.rds")
@@ -1294,8 +1589,6 @@ predclaim2%>%
 1. To improve accuracy, we can add feature engineering and localized model selection by time series identifier.
 
 2. We can also choose the final predicted value according to the confident interval to improve our result since the exact AE is in the overlap of 5 models.
-
-We predict the shrunk AE on testing set. Our model will provide with predicting shrunk AE and confidence interval. 
 # Conclusion
 # Future Directions
 
