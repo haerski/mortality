@@ -218,6 +218,23 @@ Our target variable is whether a client is adverse. We choose the threshold $AE>
 
 ## Intro
 
+
+Here we will look at what happens when time-dependent data is added. At the moment, we only use deaths per day per zipcode.
+
+The datasets we are going to use are
+1. "data/deaths_zip3.feather" 
+We take daily covid deaths from this file and make them weekly. We will look at weekly deaths instead of deaths to date.
+2. "data/simulation_data/all_persons.feather"
+This contains simulated clients information.
+3."data/data.feather"
+This contains zip3 information.
+
+We take daily covid deaths from data set 1 ("data/deaths_zip3.feather") and make them weekly. We will look at weekly deaths instead of deaths to date. We call this dataframe "deaths".
+
+From data set 2 ("data/simulation_data/all_persons.feather") we make a data frame "per" and data frame "clients". We
+
+
+
 ```{r message = FALSE}
 library(tidyverse)
 library(tidymodels)
