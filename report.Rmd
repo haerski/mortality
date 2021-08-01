@@ -860,7 +860,7 @@ Now, we present our Boosted trees model. We remove the following from the list o
 ```{r}
 xgboost_recipe <-
   recipe(formula = class ~ ., data = weekly_data) %>%
-  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, hime_deaths) %>%
+  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, ihme_deaths) %>%
   step_zv(all_predictors())
 
 xgboost_spec <-
