@@ -1566,7 +1566,8 @@ forecasted_data %>%
 Get weeklydata from time.Rmd
 ```{r}
 clients <-
-  read_feather("data/process.feather") %>%
+  read_feather("data/processed_data_20_12_23.feather") %>%
+  select(-adverse, -ae_2020, -smoothed_deaths, -actual_2021, -ae_2021, -actual_2020, -actual_2019, -ae_2019, -STATE_NAME, -ihme_deaths) %>%
   filter(date >= "2020-03-15") %>%
   mutate(client = as.factor(client)) %>%
   #select(-year) %>%
@@ -2125,7 +2126,7 @@ conf1%>%
 
 What to calculate claim
 ```{r}
-claim <- read_feather("process.feather")%>%
+claim <- read_feather("data/processed_data_20_12_23.feather")%>%
   select(date, client, claims, expected, shrinkage,volume)
 ```
 ```{r}
