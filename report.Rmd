@@ -391,6 +391,7 @@ Thus in the following we use the recipe where 2019 AE is removed.
 We note that the above analysis was done with models with default hyperparameters.
 It is certainly possible that some methods would have seen benefits from tuning.
 
+<<<<<<< Updated upstream
 ## Model selection
 With our data preprocessing locked in, we turn to model selection next.
 We will look at five models, each with 10 different hyperparameters.
@@ -565,6 +566,9 @@ confusion_matrix %>% autoplot(type = "heatmap")
 
 confusion_matrix %>% summary()
 ```
+=======
+## Methods
+>>>>>>> Stashed changes
 
 
 
@@ -705,17 +709,197 @@ sln_wf <-
   add_model(sln_spec)
 ```
 
+We can take each of these models and evaluate their performance separately, but we want to find a way where we can compare their performance through time. So, we create a tribble containing the six different workflows, we fit out training set and we predict our forecasted_test. For the prediction, we use class_predict to come up with a class (this prediction will be used to calculate accuracy, sensitivity and specificity). We also use prob_predict (by adding type="prob") to come up with a predicitive probability (used to calculate the ROC_AUC). 
+
+```{r Short_model_comp, cache = TRUE}
+wflows <- tribble(~wflow ,
+                  sln_wf,
+                  knn_wf, log_wf, forest_wf, bt_wf)
+ 
+
+
+wflows <-
+  wflows %>%
+  mutate(wflows_fit = map(wflow, ~ fit(.x, train))) 
+
+wflows <-
+  wflows %>%
+  mutate(
+    class_predict = map(wflows_fit, ~ predict(.x, forecasted_test)),  
+    prob_predict = map(wflows_fit, ~ predict(.x, forecasted_test, type = "prob")))
+```
+
+Now that we have our prediction as a class and as a probability, we are ready to compare the metrics for the five models. 
+```{r}
+wflows %>%
+  bind_cols(tribble(~id, "neural network", "nearest neigbor", "logistic regression", " Random Forest", "Boosted Trees")) %>%
+  select(-wflow, -wflows_fit) %>%
+  mutate(prob_predict = map(prob_predict, ~ bind_cols(.x, test %>% select(date, class)))) %>%
+  unnest(c(class_predict, prob_predict)) %>%
+  group_by(id, date) %>%
+  summarize(
+            sens = sens_vec(class, .pred_class),
+            spec = spec_vec(class, .pred_class),
+            roc_auc = roc_auc_vec(class, .pred_Adverse),
+            accuracy = accuracy_vec(class, .pred_class), .groups = "keep") %>%
+  pivot_longer(sens:accuracy, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = id)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)
+```
+One can wonder how much our models are being affected by the forecasting of deaths. Let's replace forecasted_test by test and let's see what happens. (So, now actual deaths is used insetad of forecasted deaths).We will figure out there the difference is not very big and somehow our forecasting is not affecting the models in a bad way. 
+
+```{r}
+wflows_cheat <-
+  wflows %>%
+  mutate(
+    class_predict = map(wflows_fit, ~ predict(.x, test)),  
+    prob_predict = map(wflows_fit, ~ predict(.x, test, type = "prob")))
+
+
+wflows_cheat %>%
+  bind_cols(tribble(~id, "Neural Network", "Nearest Neighbor", "Logistic Regression", "Random Forest", "Boosted Trees")) %>%
+  select(-wflow, -wflows_fit) %>%
+  mutate(prob_predict = map(prob_predict, ~ bind_cols(.x, test %>% select(date, class)))) %>%
+  unnest(c(class_predict, prob_predict)) %>%
+  group_by(id, date) %>%
+  summarize(
+            sens = sens_vec(class, .pred_class),
+            spec = spec_vec(class, .pred_class),
+            roc_auc = roc_auc_vec(class, .pred_Adverse), 
+            accuracy = accuracy_vec(class, .pred_class), .groups = "keep") %>%
+  pivot_longer(sens:accuracy, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = id)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ## Results
 
+Comparing the models above, we can see that the Boosted Trees is the best model. So, we use it for the rest of the project, we tune it, and we report the results. 
+
+First, we split our clients into training and testing clients. 
+The training clients are "known"; they will be what the model will be trained on and they represent 75% of our total. 
+The testing clients are "unknown"; they will represent brand new clients and they represent 25% of our total. 
+
+```{r}
+set.seed(1213)
+training_clients <-
+  weekly_data %>%
+  nest_by(client) %>%
+  ungroup() %>%
+  slice_sample(prop = 3/4) %>%
+  pull(client)
+
+testing_clients <-
+  weekly_data %>%
+  filter(!client %in% training_clients) %>%
+  pull(client) %>%
+  unique()
+```
+
+We next divide the dates into training and testing dates. 
+Our training period includes all dates before January 1 2021, and our testing period includes the next four months (so up to April 2021).  
+
+```{r}
+start <- ceiling_date(ymd("2021-01-01"), unit = "week")
+end <- ceiling_date(ymd("2021-04-01"), unit = "week")
+```
+
+The goal of the following is to tune the Boosted Trees and to make the best possible model! 
+To do so, we divide the training dates into analysis dates (all dates before October 1) and assessment dates (all dates before January 1). 
+
+```{r}
+analys <- ceiling_date(ymd("2020-10-01"), unit = "week")
+assess <- start
+```
+
+We then split the training clients into analysis (75% of the training or known clients) and assessment (25% of the known clients). 
+
+```{r}
+set.seed(123)
+ana_clients <-
+  training_clients %>%
+  sample(length(.) * 3 / 4)
+
+ana_idx <-
+  weekly_data %>%
+  rownames_to_column() %>%
+  filter(client %in% ana_clients & date <= analys) %>%
+  pull(rowname) %>% as.integer()
+
+ass_idx <-
+  weekly_data %>%
+  rownames_to_column() %>%
+  filter(client %in% training_clients) %>%
+  filter(!client %in% ana_clients & date == assess) %>%
+  pull(rowname) %>%
+  as.integer()
+
+spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly_data)
+resmpl <- manual_rset(list(spl), c("foo"))
+```
+
+Now, we present our Boosted trees model. We remove the following from the list of predictors: zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, hime_deaths, 
+
+```{r}
+xgboost_recipe <-
+  recipe(formula = class ~ ., data = weekly_data) %>%
+  step_rm(zip3, date, client, claims, zip_deaths, smoothed_ae, shrunk_ae, ae, hime_deaths) %>%
+  step_zv(all_predictors())
+
+xgboost_spec <-
+  boost_tree(trees = tune(), tree_depth = tune(), learn_rate = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("xgboost", nthread = 8)
+
+xgboost_workflow <-
+  workflow() %>%
+  add_recipe(xgboost_recipe) %>%
+  add_model(xgboost_spec)
+```
 
 
+We tuned the model using the following hyperparameters: number of trees, tree depth and learning rate.  
+We use simulated annealing to find a set of parameters that maximizes `roc_auc`.
+```{r cache = TRUE, collapse = TRUE}
+set.seed(98324)
+res_grd <-
+  xgboost_workflow %>%
+  tune_grid(
+    resamples = resmpl,
+    grid = 10,
+    metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy),
+    control = control_grid(verbose = TRUE))
 
-
-
-
-
+res <-
+  xgboost_workflow %>%
+  tune_sim_anneal(
+      resamples = resmpl,
+      iter = 20,
+      initial = res_grd,
+      metrics = metric_set(roc_auc, sens, spec, j_index, yardstick::accuracy))
+```
 
 
 

@@ -402,6 +402,157 @@ test %>%
   ggplot(aes(x = date, y = value, color = metric)) + geom_line()
 ```
 
+
+```{r}
+library(fable)
+library(tsibble)
+```
+
+```{r cache = TRUE}
+forecast <-
+  processed_data %>%
+  filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
+  as_tsibble(index = date, key = client) %>%
+  model(arima = ARIMA(smoothed_deaths)) %>%
+  forecast(h = "4 months")
+```
+
+We create a new set called "forecasted_test" out of our testing set where we replace "smoothed_deaths" by "forecasted_deaths".
+
+```{r}
+forecasted_test <-
+  forecast %>%
+  as_tibble() %>%
+  select(client, date, .mean) %>%
+  right_join(test, by = c("client", "date")) %>%
+  select(-smoothed_deaths) %>%
+  rename(smoothed_deaths = .mean)
+```
+
+Now, the awaited part! We are ready to introduce our modeling strategy! 
+
+We first start by introducing a common recipe that we will use for all our models. Our target variable is class, we use all the predictors in weekly_data except for client, zip3, claims, smoothed_ae, shrunk_ae, ae, zip_deaths, ihme_deaths and date. We normalize all predictors and we apply log to both Volume of the client and Population of the zip code.  
+```{r}
+common_recipe <-
+  recipe(class ~ ., data = weekly_data) %>%
+  step_rm(client, zip3, claims, smoothed_ae, shrunk_ae,  ae, zip_deaths, ihme_deaths, date) %>%
+  step_zv(all_predictors()) %>%
+  step_log(volume, POP) %>%
+  step_normalize(all_predictors())
+```
+
+Now, that we have our recipe, we are ready to try out different models and report the results. Let us introduce the six models and then we will talk a little bit about each one of them. 
+
+```{r}
+forest_spec <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", num.threads = 8, seed = 123456789) %>%
+  set_mode("classification")
+
+log_spec <- 
+  logistic_reg(
+  mode = "classification",
+  engine = "glm")
+
+svm_lin_spec <-
+  svm_linear() %>%
+  set_engine("LiblineaR") %>%
+  set_mode("classification")
+
+knn_spec <-
+  nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+sln_spec <-
+  mlp(activation = "relu", hidden_units = 6, epochs = 100) %>%
+  set_engine("keras", verbose=0) %>%
+  set_mode("classification")
+
+
+bt_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = 100)
+```
+
+We use Random Forest (forest), Logistic Regression (log), SVM (linear kernel), Nearest Neighbor (knn), Neural Network with single layer (sln) and Boosted Trees (bt) respectively with the default setting. For the Random Forest, we consider 1000 trees and for the Boosted Trees, we take 100 trees. All of these models use different engines introduced in tidymodels, and they are all set to mode=classficiation. 
+
+We then create the workflow for the six models mentioned above with the recipe taken to be the "common recipe" and the model taken to be the ones introduced in the previous chunk. 
+
+```{r}
+bt_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(bt_spec)
+
+log_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(log_spec)
+
+forest_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(forest_spec)
+
+svm_lin_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(svm_lin_spec)
+
+knn_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(knn_spec)
+
+sln_wf <-
+  workflow() %>%
+  add_recipe(common_recipe) %>%
+  add_model(sln_spec)
+```
+
+We can take each of these models and evaluate their performance separately, but we want to find a way where we can compare their performance through time. So, we create a tribble containing the six different workflows, we fit out training set and we predict our forecasted_test. For the prediction, we use class_predict to come up with a class (this prediction will be used to calculate accuracy, sensitivity and specificity). We also use prob_predict (by adding type="prob") to come up with a predicitive probability (used to calculate the ROC_AUC). 
+
+```{r cache = TRUE}
+wflows <- tribble(~wflow ,
+                  sln_wf,
+                  knn_wf, log_wf, forest_wf, bt_wf)
+ 
+
+
+wflows <-
+  wflows %>%
+  mutate(wflows_fit = map(wflow, ~ fit(.x, train))) 
+
+wflows <-
+  wflows %>%
+  mutate(
+    class_predict = map(wflows_fit, ~ predict(.x, forecasted_test)),  
+    prob_predict = map(wflows_fit, ~ predict(.x, forecasted_test, type = "prob")))
+```
+
+Now that we have our prediction as a class and as a probability, we are ready to compare the metrics for the five models. 
+```{r}
+wflows %>%
+  bind_cols(tribble(~id, "neural network", "nearest neigbor", "logistic regression", " Random Forest", "Boosted Trees")) %>%
+  select(-wflow, -wflows_fit) %>%
+  mutate(prob_predict = map(prob_predict, ~ bind_cols(.x, test %>% select(date, class)))) %>%
+  unnest(c(class_predict, prob_predict)) %>%
+  group_by(id, date) %>%
+  summarize(
+            sens = sens_vec(class, .pred_class),
+            spec = spec_vec(class, .pred_class),
+            roc_auc = roc_auc_vec(class, .pred_Adverse),
+            accuracy = accuracy_vec(class, .pred_class), .groups = "keep") %>%
+  pivot_longer(sens:accuracy, names_to = "metric", values_to = "value") %>%
+  ungroup() %>%
+  ggplot(aes(x = date, y = value, color = id)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ metric)
+```
+
 ### Other models
 
 Now, let's check other models and see if we can find better performance. First, we start with SVM_poly.
