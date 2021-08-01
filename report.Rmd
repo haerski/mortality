@@ -1027,7 +1027,13 @@ tests %>%
 ```
 
 ### Explaining outcomes
-Use DALEX
+
+One of the most important part in any model is interpreting the result. Model interpretability helps extracting insight and clarity regarding how the algorithms are performing. 
+There are several tools that can be used to increase the model transparency. 
+In the following, we will use the DALEX package. DALEX uses a process called breakdown to compute localized variable importance scores. For each client, we can explain why a case receives its prediction and how each predictor contributes either positively or negatively to the target variable. The local interpretability enables us to pinpoint and contrast the impacts of the factors.
+
+
+We explain how much each feature contributes to the value of a single prediction using the following. We will explain the plots after running the code. 
 ```{r fig.height = 5, fig.width = 5}
 library(DALEX)
 library(DALEXtra)
@@ -1058,8 +1064,9 @@ predict_parts(recipe %>% bake(test_obs) %>% select(-class)) %>%
   plot(digits = 2, max_features = 5, title = "Client 405")
 ```
 
-
-
+We use client 405 (Not Adverse) from our known clients and client 397 (Adverse) from our unknown clients. 
+The prediction in blue is the probability that the client is not adverse. For client 405, since the prediction is 0.53 (>0.5), this client is not adverse. For client 397, since the prediction is 0.37 (<0.5), this client is adverse. Now, a red bar means that this predictor has a negative contribution to the non-adversability of the client. And a green bar means that this predictor has  a positive contribution in the non-adversability of the client. 
+For instance, comparing clients 397 and 405, we can see that smoothed_deaths for client 397 is so much bigger than the value for client 405 and hence the contribution of this predictor to the adversability is larger for client 397 (red bar is bigger). 
 
 
 
