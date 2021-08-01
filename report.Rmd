@@ -505,6 +505,8 @@ The function `probably::threshold_perf` will compute seveal metrics, but we plot
 These are averaged over the 10 crossvalidation sets.
 
 ```{r}
+library(probably)
+
 forest_resamples <-
   final_forest %>%
   finalize_workflow(best_params) %>%
@@ -518,6 +520,8 @@ forest_resamples <-
   rowwise() %>%
   mutate(thr_perf = list(threshold_perf(.predictions, adverse, `.pred_ae > 3`, thresholds = seq(0.0, 1, by = 0.01))))
 
+my_threshold <- 0.67
+
 forest_resamples %>%
   select(thr_perf, id) %>%
   unnest(thr_perf) %>%
@@ -525,16 +529,42 @@ forest_resamples %>%
   summarize(estimate = mean(.estimate)) %>%
   filter(.metric != "distance") %>%
   ggplot(aes(x = .threshold, y = estimate, color = .metric)) + geom_line() +
-  geom_vline(xintercept = 0.67, linetype = "dashed") +
+  geom_vline(xintercept = my_threshold, linetype = "dashed") +
   labs(x = "Threshold", y = "Estimate", color = "Metric", title = "Sensitivity and specificity by threshold")
 ```
 
 Some expertise and business intuition is required in order to determine the desired threshold value.
 Due to a lack of time and resources, we decided to choose a threshold value that would simultaneously optimize for sensitivity and specificity. To that extent, we choose the threshold value of 0.67.
 
-## Methods
+## Final results
+With all the parameters chosen, we can finally train our random forest on the whole training set, and test it on the test set. We add to the testing set our probabilities.
+```{r}
+trained_forest <-
+  final_forest %>%
+  fit(training(init))
 
-## Results
+thresholded_predictions <-
+  trained_forest %>%
+  predict(testing(init), type = "prob") %>%
+  mutate(class_pred =
+            make_two_class_pred(
+                  `.pred_ae > 3`,
+                  levels = levels(yearly_data$adverse),
+                  threshold = my_threshold)) %>%
+  bind_cols(testing(init))
+```
+
+We can now compute a confusion matrix and some summary statistics. Note that we have 124 clients in the testing set, of which 74% are high risk (`ae > 3`). This is the No Information Rate.
+```{r}
+confusion_matrix <-
+  thresholded_predictions %>%
+  conf_mat(adverse, class_pred)
+
+confusion_matrix %>% autoplot(type = "heatmap")
+
+confusion_matrix %>% summary()
+```
+
 
 
 # Short-term model
