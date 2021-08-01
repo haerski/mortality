@@ -684,10 +684,13 @@ trained_forest %>%
 ## Introduction
 
 Now that we have introduced the long-term model and presented its results, we can move to the next step: integrating the time factor. To do this, we will be using the weekly_data through all this section. 
+```{r}
+weekly_data
+```
 
-We explain how we obtained the dataframe weekly_data.
+We explain how we obtained weekly_data.
 
-To begin with, we used the following 3 data sets:
+To begin with, we used the following 4 data sets:
 1. `data/deaths_zip3.feather`: daily covid deaths data.
 2. `data/simulation_data/all_persons.feather`:  a tibble frame created in our data wrangling process, containing simulated data for each participants from our clients.
 3. `data/data.feather` : zip3 data created in data wrangling process.
@@ -780,7 +783,6 @@ per %<>%
 ```
 
 2019 didn't have 53 weeks, so we change the deaths on week 53 in 2019 to death in week 1 of 2020. 
-
 ```{r}
 wk53 <-
   per %>%
