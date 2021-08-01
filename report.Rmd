@@ -566,6 +566,64 @@ confusion_matrix %>% autoplot(type = "heatmap")
 confusion_matrix %>% summary()
 ```
 
+Pick two specific clients as examples to illustrate our model result. We choose client 58 who located in Brooklyn, New York and client 412 who located in Asheville, North Carolina. The first one faced adverse mortality and the second one didn't. 
+
+Load `DALEX` package for plot break_down and sharp value plot.
+```{r}
+library(DALEX)
+fit_parsnip <- trained_forest %>% extract_fit_parsnip
+trained_recipe <- trained_forest %>% extract_recipe
+train <- trained_recipe %>% bake(training(init))
+test <- trained_recipe %>% bake(testing(init))
+```
+Break-down plot of New York
+```{r}
+ex <-
+  explain(
+    model = fit_parsnip,
+    data = train)
+ex %>%
+  predict_parts(train %>% slice(343)) %>%
+  plot()
+```
+Sharp value of New York
+```{r shapNY, cache = TRUE}
+shap <- predict_parts(explainer = ex,
+                      new_observation = train %>% slice(343),
+                                 type = "shap",
+                                  B = 25)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+Break-down plot of NC
+```{r}
+ex %>%
+  predict_parts(test %>% slice(80)) %>%
+  plot()
+```
+Sharp Value of NC
+```{r shapNC, cache = TRUE}
+shap <- predict_parts(explainer = ex,
+                      new_observation = test %>% slice(80),
+                                 type = "shap",
+                                  B = 25)
+                               
+plot(shap, show_boxplots = FALSE)
+```
+Variable importance
+```{r fig.width = 10, dpi = 400}
+trained_forest %>%
+  extract_fit_engine() %>%
+  importance() %>%
+  as_tibble_row() %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Importance") %>%
+  slice_max(Importance, n = 10) %>%
+  ggplot(aes(y = fct_reorder(factor(Variable), Importance), x = Importance, fill = fct_reorder(factor(Variable), Importance))) +
+  geom_col() +
+  scale_fill_brewer(palette = "Spectral") +
+  guides(fill = "none") + labs(y = "Variable", x = "Importance")
+```
+
 
 # Short-term model
 
