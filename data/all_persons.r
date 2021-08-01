@@ -23,7 +23,7 @@ all_persons <- (1:10) %>% map_dfr(read_data)
 
 all_persons <-
   all_persons %>%
-  group_by(client,participant) %>%
+  group_by(client, participant) %>%
   arrange(year, week, .by_group = TRUE) %>%
   slice_head()
 
