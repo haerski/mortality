@@ -391,7 +391,6 @@ Thus in the following we use the recipe where 2019 AE is removed.
 We note that the above analysis was done with models with default hyperparameters.
 It is certainly possible that some methods would have seen benefits from tuning.
 
-<<<<<<< Updated upstream
 ## Model selection
 With our data preprocessing locked in, we turn to model selection next.
 We will look at five models, each with 10 different hyperparameters.
@@ -566,10 +565,6 @@ confusion_matrix %>% autoplot(type = "heatmap")
 
 confusion_matrix %>% summary()
 ```
-=======
-## Methods
->>>>>>> Stashed changes
-
 
 
 # Short-term model
