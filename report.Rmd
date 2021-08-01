@@ -584,7 +584,7 @@ ex <-
     data = train)
 ex %>%
   predict_parts(train %>% slice(343)) %>%
-  plot()
+  plot(digits = 2, max_features = 5, title = "Client 58, New York, Brooklyn")
 ```
 Sharp value of New York
 ```{r shapNY, cache = TRUE}
@@ -593,13 +593,13 @@ shap <- predict_parts(explainer = ex,
                                  type = "shap",
                                   B = 25)
                                
-plot(shap, show_boxplots = FALSE)
+plot(shap, show_boxplots = FALSE, title = "Client 58, New York, Brooklyn")
 ```
 Break-down plot of NC
 ```{r}
 ex %>%
   predict_parts(test %>% slice(80)) %>%
-  plot()
+  plot(digits = 2, max_features = 5, title = "Client 412, North Carolina, Asheville")
 ```
 Sharp Value of NC
 ```{r shapNC, cache = TRUE}
@@ -608,7 +608,7 @@ shap <- predict_parts(explainer = ex,
                                  type = "shap",
                                   B = 25)
                                
-plot(shap, show_boxplots = FALSE)
+plot(shap, show_boxplots = FALSE, title = "Client 412, North Carolina, Asheville")
 ```
 Variable importance
 ```{r fig.width = 10, dpi = 400}
