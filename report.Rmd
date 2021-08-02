@@ -68,11 +68,11 @@ Filename | Source | Description
 ---------|--------|------------
 `covid_deaths_usafacts.csv` | [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/) | Cumulative weekly COVID-19 deaths by county
 `soa_base_2017.csv` | (Sent by Douglas Armstrong) | $q_x$ values by gender, age, industry
-`Population_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/) | Population estimates of the U.S., states and counties, 2019
+`Population_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/data-products/county-level-data-sets/download-data/) | Population estimates of the U.S., states and counties, 2019
 `COVID-19_Vaccinations_in_the_United_States_County_data.gov.csv` | [CDC](https://catalog.data.gov/dataset/covid-19-vaccinations-in-the-united-statescounty-8204e) | Overall US COVID-19 Vaccine administration and vaccine equity data at county level
-`Education_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/) | Educational attainment for adults age 25 and older for the U.S., states and counties, 2015-19
-`Poverty_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/) | Poverty rates in the U.S., states and counties, 2019
-`Unemployment_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/) | Unemployment rates, 2019 and 2020; median househould income, 2019. States and counties
+`Education_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/data-products/county-level-data-sets/download-data/) | Educational attainment for adults age 25 and older for the U.S., states and counties, 2015-19
+`Poverty_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/data-products/county-level-data-sets/download-data/) | Poverty rates in the U.S., states and counties, 2019
+`Unemployment_Estimates.csv` | [USDA ERS](https://www.ers.usda.gov/data-products/county-level-data-sets/download-data/) | Unemployment rates, 2019 and 2020; median househould income, 2019. States and counties
 `Vaccine_Hesitancy_for_COVID-19__County_and_local_estimates.csv` | [CDC](https://catalog.data.gov/dataset/vaccine-hesitancy-for-covid-19-county-and-local-estimates) | Vaccine hesitancy estimates for COVID-19
 `countypres_2000-2020.csv` | [MIT Election Data + Science Lab](https://dataverse.harvard.edu/file.xhtml?fileId=4819117&version=9.0) | Election data by county (only 2020 used)
 `zcta_county_rel_10.txt` | [US Census Bureau](https://www.census.gov/geographies/reference-files/time-series/geo/relationship-files.2010.html#par_textimage_674173622) | Zip code to county relationship file (2010)
