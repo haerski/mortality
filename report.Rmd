@@ -777,7 +777,7 @@ weekly_data %>%
   pivot_longer(-date, names_to = "pth", values_to = "smoothed_ae") %>%
   ggplot(aes(x = date, y = smoothed_ae, color = pth)) +
   geom_line() +
-  geom_hline(yintercept = 1, linetype = "dashed")
+  geom_hline(yintercept = 2.5, linetype = "dashed")
 ```
 
 Based on this, we choose `smoothed shrunk AE > 2.5` as "Adverse", which corresponds to the dotted line above.
