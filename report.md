@@ -1,4 +1,24 @@
 
+# Predicting Group Life Client Mortality during a Pandemic, final report
+IMA Math-to-Industry Bootcamp, Securian Financial
+
+Team members:
+
+ * Marc Härkönen
+ * Samara Chamoun
+ * Shuxian Xu
+ * Abba Ramadan
+ * Lei Yang
+ * Yuchen Cao
+
+Mentor:
+
+ * Douglas Armstrong
+
+Supervisors:
+
+ * Daniel Spirn
+ * Thomas Höft
 
 # Executive summary
 
@@ -8,14 +28,14 @@ In March 2020, with the pandemic starting,  the whole world fell into a state of
 
 We are team Outliers from the Securian Financial Department of Data Science and we think we have the resources, the expertise and the determination to present the management team with a whole new set of information that can help their decision making during a pandemic. With Group Life Insurance being an important part of our company and for our clients, there is no doubt that we should look closely at how it is being affected by the recent events. For the past few weeks, we have been working on a project that aims to predict Group Life mortality for our clients during a pandemic. 
 
-One might ask how the pandemic is exactly affecting group life insurance. As we know, life insurance guarantees payment of death benefits. Since the COVID-19 breakout, our clients are experiencing a higher mortality rate then usual, which has resulted in an unprecedented increase in claims. Our primary function data scientists is to correctly forecast the mortality risk, and the way to do that is by first tracking the claims performance.
+One might ask how the pandemic is exactly affecting group life insurance. As we know, life insurance guarantees payment of death benefits. Since the COVID-19 breakout, our clients are experiencing a higher mortality rate then usual, which has resulted in an unprecedented increase in claims. Our primary function as data scientists is to correctly forecast the mortality risk, and the way to do that is by first tracking the claims performance.
 We classify clients as high-risk and low-risk by using one of the most popular metrics to track claims performance, the Actual-to-Expected ratio (AE).
 Observing the large shift of the proportion of clients that are classified as high-risk from 2019 to 2020, we hypothesize that the pre-pandemic, historical AE of a client is no longer a good predictor of the client’s performance during a pandemic.
 
 We aim at replacing this historical AE with a predictive one that can help our management and sales team have better insight on the possibility that a client experiences an Adverse mortality event during an outbreak. We collect data from the zip codes where the companies are located: poverty percentage, education level, unemployment rate, etc. We then combine this information with some characteristics of the companies such as average age of employees and some pandemic-related resources. We then apply several machine learning models, validate the results and build the best possible insight for proper risk-management.  
 
 We provide our management team with two models: one is long-term and the other is short-term. Each of these models serve different purposes and bring valuable assets to the company. 
-The long-term model can be used at a specific time and uses the information of some clients to predict what can happen to other clients in different zip codes. While working on this model, our goal was to minimize the loss of money for Securian that can be caused by long-term adverse mortality event such as a pandemic. On one hand, we aime at minimizing the number of clients that were adverse and predicted otherwise. We also wanted to prevent the company from losing clients that will perform well, so we simultaneously focused on minimizing the number of clients that are not adverse and predicted to be so. The strength of this model lies in understanding the contributions of different predictors in the performance of the clients. The management team can have better insights and clarity regarding how each predictor contributes positively or negatively into the classification. It is worthy to note that adding the AE2019 to the list of predictors for this model won’t make any additional improvements.
+The long-term model can be used at a specific time and uses the information of some clients to predict what can happen to other clients in different zip codes. While working on this model, our goal was to minimize the loss of money for Securian that can be caused by long-term adverse mortality event such as a pandemic. On one hand, we aim at minimizing the number of clients that were adverse and predicted otherwise. We also wanted to prevent the company from losing clients that will perform well, so we simultaneously focused on minimizing the number of clients that are not adverse and predicted to be so. The strength of this model lies in understanding the contributions of different predictors in the performance of the clients. The management team can have better insights and clarity regarding how each predictor contributes positively or negatively into the classification. It is worthy to note that adding the AE2019 to the list of predictors for this model won’t make any additional improvements.
 
 As opposed to the long term model, the short term model integrates the time factor and can react to changes during the pandemic.
 Not only can the model predict the future performance of existing clients, it can also do so for potential new clients.
@@ -149,7 +169,7 @@ read_data <- function(n) {
 all_persons <- (1:10) %>% map_dfr(read_data)
 ```
 
-We noticed that some individuals die more than once. This removes multiple deaths
+We noticed that some individuals die more than once. The following removes the multiple deaths. 
 
 ```r
 all_persons <-
@@ -272,7 +292,7 @@ Variable | Description
 `hes`, `hes_uns`, `str_hes` | percentage of the zip population that are vaccine hesitant, hesitant or unsure, and strongly hesistan respectively
 
 # Data exploration and motivation
-Since the pandemic started, our client claims increased dramatically.
+Since the pandemic started, our clients' claims increased dramatically.
 In normal times, we expect an Actual-to-Expected ratio close to 1.
 As we can see below, this doesn't apply in times of pandemic.
 
@@ -625,7 +645,7 @@ forest_resamples %>%
 
 ![plot of chunk unnamed-chunk-24](figures/report/fig-unnamed-chunk-24-1.png)
 
-Some expertise and business intuition is required in order to determine the desired threshold value.
+Some expertise and business intuition are required in order to determine the desired threshold value.
 Due to a lack of time and resources, we decided to choose a threshold value that would simultaneously optimize for sensitivity and specificity. To that extent, we choose the threshold value of 0.67, corresponding to the dotted line above.
 
 ## Final results
@@ -686,7 +706,7 @@ confusion_matrix %>% summary()
 
 We pick two specific clients as examples to explain our model result. We choose client 58 who is located in Brooklyn, New York and client 412 who is located in Asheville, North Carolina. The first one faced adverse mortality and the second one didn't.
 
-Load the `DALEX` package to plot break-down plots and to compute SHAP values.
+We load the `DALEX` package to plot break-down plots and to compute SHAP values.
 
 ```r
 library(DALEX)
@@ -700,7 +720,7 @@ train <- trained_recipe %>% bake(training(init))
 test <- trained_recipe %>% bake(testing(init))
 ```
 
-Below, the break-down plot of the client located in New York
+Below, we have the break-down plot of the client located in New York.
 
 ```r
 ex <-
@@ -735,7 +755,7 @@ ex %>%
 
 ![plot of chunk unnamed-chunk-29](figures/report/fig-unnamed-chunk-29-1.png)
 
-SHAP values of the client located in New York
+The following presents the SHAP values of the client located in New York.
 
 ```r
 shap <- predict_parts(explainer = ex,
@@ -750,7 +770,7 @@ plot(shap, show_boxplots = FALSE, title = "Client 58, New York, Brooklyn")
 
 ![plot of chunk unnamed-chunk-30](figures/report/fig-unnamed-chunk-30-1.png)
 
-Break-down plot of the client located in NC
+This is the break-down plot of the client located in NC.
 
 ```r
 ex %>%
@@ -760,7 +780,7 @@ ex %>%
 
 ![plot of chunk unnamed-chunk-31](figures/report/fig-unnamed-chunk-31-1.png)
 
-SHAP values of the client located in NC
+And those are the SHAP values of the client located in NC.
 
 ```r
 shap <- predict_parts(explainer = ex,
@@ -893,7 +913,7 @@ test <-
   filter(date > "2021-01-01" & date <= "2021-04-01")
 ```
 
-That are two mains things that set this model apart from the long term model introduced in the first section. First, the AE is updated weekly as opposed to the long term model where the AE is taken yearly. Second, we are adding weekly deaths as one of the predictors in addition to the variables introduced in the long term model. Now, that we have a clear understanding of the predictors in the short term model, the question that arises is how we can use the weekly deaths in the testing time (since such information won't be available for us in the "future"). To solve this issue, we decided to forecast the deaths for this "future" period: so we will use the weekly deaths from March 2020 to January 2021 and forecast the weekly deaths 4 months later. To do so, we will use the ARIMA forecaster. 
+That are two mains things that set this model apart from the long term model introduced in the first section. First, the AE is updated weekly as opposed to the long term model where the AE is taken yearly. Second, we are adding weekly deaths as one of the predictors in addition to the variables introduced in the long term model. Now, that we have a clear understanding of the predictors in the short term model, the question that arises is how we can use the weekly deaths in the testing time (since such information won't be available for us in the "future"). To solve this issue, we decided to forecast the deaths for this "future" period: so we will use the weekly deaths from March 2020 to January 2021 and forecast the weekly deaths 3 months later. To do so, we will use the ARIMA forecaster. 
 
 
 ```r
@@ -908,16 +928,10 @@ forecast <-
   filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
   as_tsibble(index = date, key = client) %>%
   model(arima = ARIMA(smoothed_deaths)) %>%
-  forecast(h = "4 months")
+  forecast(h = "3 months")
 ```
 
-```
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
-
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
-```
-
-We create a new set called "forecasted_test" out of our testing set where we replace `smoothed_deaths` by `forecasted_deaths`.
+We create a new set called `forecasted_test` out of our testing set where we replace `smoothed_deaths` by `forecasted_deaths`.
 
 
 ```r
@@ -1022,7 +1036,7 @@ wflows <-
 ```
 
 ```
-## [19:33:55] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [21:04:54] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 ```r
@@ -1057,7 +1071,7 @@ wflows %>%
 
 ![plot of chunk unnamed-chunk-45](figures/report/fig-unnamed-chunk-45-1.png)
 
-One can wonder how much our models are being affected by the forecasting of deaths. Let's replace `forecasted_test` by `test` and let's see what happens. (So, now actual deaths is used insetad of forecasted deaths). We see that the difference is not very big and our forecasting is not affecting the models in a bad way. 
+One can wonder how much our models are being affected by the forecasting of deaths. Let's replace `forecasted_test` by `test` and let's see what happens. (So, now actual deaths is used instead of forecasted deaths). We see that the difference is not very big and our forecasting is not affecting the models in a bad way. 
 
 
 ```r
@@ -1094,7 +1108,7 @@ wflows_cheat %>%
 
 Comparing the models above, we can see that the Boosted Trees is the best model. So, we use it for the rest of the project, we tune it, and we report the results. 
 
-One of our goals is the have a model that can predict clients it hasn't seen before.
+One of our goals is to have a model that can predict clients it hasn't seen before.
 First, we split our clients into training and testing clients.
 The training clients are "known"; they will be what the model will be trained on and they represent 75% of our total. 
 The testing clients are "unknown"; they will represent brand new clients and they represent 25% of our total. 
@@ -1117,7 +1131,7 @@ testing_clients <-
 ```
 
 We next divide the dates into training and testing dates. 
-Our training period includes all dates before January 1 2021, and our testing period includes the next four months (so up to April 2021).  
+Our training period includes all dates before January 1 2021, and our testing period includes the next three months (so up to April 2021).  
 
 
 ```r
@@ -1314,7 +1328,7 @@ best_parms <- res %>% select_best(metric = "roc_auc")
 final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
 ```
 
-We now need to forecast 4 months worth of `smoothed_deaths`.
+We now need to forecast 3 months worth of `smoothed_deaths`.
 
 ```r
 forecast <-
@@ -1322,19 +1336,7 @@ forecast <-
   filter(date >= "2020-03-15" & date <= start) %>%
   as_tsibble(index = date, key = client) %>%
   model(arima = ARIMA(smoothed_deaths)) %>%
-  forecast(h = "4 months")
-```
-
-```
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
-
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
-
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
-
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
-
-## Warning in sqrt(diag(best$var.coef)): NaNs produced
+  forecast(h = "3 months")
 ```
 
 We create a new data called `forecast_data` where the actual deaths are replaced by the forecasted deaths. 
@@ -1401,7 +1403,7 @@ trained_wf <-
 ```
 
 ```
-## [14:34:13] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+## [21:06:05] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 ```
 
 Now, we can create a tibble `tests` out of these 4 testing sets.
@@ -1431,10 +1433,6 @@ tests %>%
   filter(metric == "Accuracy") %>%
   ggplot(aes(x = date, y = value, color = id)) + geom_line(aes(linetype = str_detect(id, "true"))) +
   labs(x = "Date", y = "Accuracy", color = "") + guides(linetype = "none")
-```
-
-```
-## `summarise()` has grouped output by 'id'. You can override using the `.groups` argument.
 ```
 
 ![plot of chunk unnamed-chunk-58](figures/report/fig-unnamed-chunk-58-1.png)
@@ -1509,7 +1507,7 @@ For instance, comparing clients 397 and 405, we can see that `smoothed_deaths` f
 
 
 # Other modelling attempts
-In this section, we introduce models we tried and did not work as well.
+In this section, we introduce some models that we tried but did not work as well.
 
 We want to predict the `AE value` for each client for each week during COVID-19. Since the weekly AE value changes dramatically, we decide to predict the `shrunk AE`. For detail of shrunk AE, check the section on the long-term model. 
 
@@ -1542,17 +1540,6 @@ Split our data into two part: train set (`2020-03-15` to `2020-12-27`) and test 
 ```r
   set.seed(1234)
   splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
-```
-
-```
-## Data is not ordered by the 'date_var'. Resamples will be arranged by `date`.
-```
-
-```
-## Overlapping Timestamps Detected. Processing overlapping time series together using sliding windows.
-```
-
-```r
   train = training(splits)
   test = testing(splits)
 ```
@@ -1560,7 +1547,7 @@ Split our data into two part: train set (`2020-03-15` to `2020-12-27`) and test 
 We can add feature engineering steps to get our data ready using recipes.
 We remove useless variables: `zip3`, `actual`, `claims`, `class`, `shrinkage`, `ae.`
 For extreme big number such as `population`, `volume` and `expected`, we use `step_log()` to do logarithm transformation for pre-processing.
-`step_mutate(client = droplevels(client))` to add ID variable. `step_timeseries_signature()` to creates a a specification of a recipe step that will convert date into many features that can aid in machine learning with time-series data.
+We also use `step_mutate(client = droplevels(client))` to add ID variable, `step_timeseries_signature()` to create a specification of a recipe step that will convert date into many features that can aid in machine learning with time-series data.
 
 Here `rec_obj` is for model with `ihme_deaths`, `rec_obj1` with `zip_deaths` and `rec_obj2` without any death data.
 
@@ -2370,7 +2357,7 @@ predclaim2%>%
 
 The aim of this project is to predict Group Life Insurance Mortality during a pandemic. We first observe that it is not sufficient to use the pre-pandemic AE to classify clients between low-risk and high-risk during a pandemic. Hence, we need to provide the management team with new information that helps their decision making in such unprecedented times. To serve this purpose, we collect data from the zip codes where the companies are located along with some characteristics of the companies. We present two types of models that serve valuable but different purposes: long term model and short term model.
 
-After evaluating several metrics of different machine learning models for the long term version, we choose the Random Forest and we tune its hyperparameters. We aim at minimizing the proportion of adverse clients that are incorrectly predicted as not adverse since this number causes huge money loss for Securian. Simultaneouslt, we also aim at minimizing the proportion of not adverse clients that are predicted as adverse, since this causes clients loss and hence again money loss. After choosing the best parameters, and choosing a threshold, we are able to reach a sensitivity of 85%, a specificity of 78% and an accuracy of 82%. We then use the SHAP values to increase the transparency of the model and understand the contribution of the predictors in the classification of our clients. 
+After evaluating several metrics of different machine learning models for the long term version, we choose the Random Forest and we tune its hyperparameters. We aim at minimizing the proportion of adverse clients that are incorrectly predicted as not adverse since this number causes huge money loss for Securian. Simultaneously, we also aim at minimizing the proportion of not adverse clients that are predicted as adverse, since this causes clients loss and hence again money loss. After choosing the best parameters, and choosing a threshold, we are able to reach a sensitivity of 85%, a specificity of 78% and an accuracy of 82%. We then use the SHAP values to increase the transparency of the model and understand the contribution of the predictors in the classification of our clients. 
 
 We then include the time factor in the short term model and we aim at using some known clients' performance in the past to predict both known and unknown clients' performance three months in the future. For this version, we use the rolling AE (updated weekly) that takes also into account client volume, as opposed to using yearly AE in the long term version. We also add the weekly deaths by COVID to the list of predictors used in the long term model. One key step in the process is forecasting the weekly deaths to use it in the future. For this time-dependent version, we choose the Boosted Trees model after comparing its performance with other known machine learning models. After tuning it and choosing the best parameter set, we present the accuracy of the predictions for unknown clients and compare it with the one for the known clients. 
 
@@ -2464,12 +2451,6 @@ Next, we describe the contents and dependencies of the files in the data reposit
 
  * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
  * `data/data.feather`, generated by `data/wrangling.Rmd`
-
-`comparing_time_models.Rmd`: work on ???? (TODO: samara). Depends on
-
- * `data/simulation_data/all_persons.feather`, generated by `data/all_persons.r`
- * `data/data.feather`, generated by `data/wrangling.Rmd`
- * `data/deaths_zip3.feather`, generated by `data/deaths.R`
 
 `final.Rmd`: final presentation plots. Depends on
 

@@ -2,9 +2,27 @@
 knitr::opts_chunk$set(
       fig.path = "figures/report/fig-",
       cache.path = "cache/report/")
-#Don't print warning and message in knit
-# knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
 ```
+# Predicting Group Life Client Mortality during a Pandemic, final report
+IMA Math-to-Industry Bootcamp, Securian Financial
+
+Team members:
+
+ * Marc Härkönen
+ * Samara Chamoun
+ * Shuxian Xu
+ * Abba Ramadan
+ * Lei Yang
+ * Yuchen Cao
+
+Mentor:
+
+ * Douglas Armstrong
+
+Supervisors:
+
+ * Daniel Spirn
+ * Thomas Höft
 
 # Executive summary
 
@@ -791,7 +809,7 @@ library(fable)
 library(tsibble)
 ```
 
-```{r forecast, cache = TRUE}
+```{r forecast, cache = TRUE, warning = FALSE}
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= "2021-01-01") %>%
@@ -800,7 +818,7 @@ forecast <-
   forecast(h = "3 months")
 ```
 
-We create a new set called "forecasted_test" out of our testing set where we replace `smoothed_deaths` by `forecasted_deaths`.
+We create a new set called `forecasted_test` out of our testing set where we replace `smoothed_deaths` by `forecasted_deaths`.
 
 ```{r}
 forecasted_test <-
@@ -887,7 +905,7 @@ sln_wf <-
 
 We can take each of these models and evaluate their performance separately, but we want to find a way where we can compare their performance through time. So, we create a tibble containing the five different workflows, we fit out training set and we predict our `forecasted_test.` For the prediction, we use `class_predict` to come up with a class (this prediction will be used to calculate accuracy, sensitivity and specificity). We also use `prob_predict` to come up with a predicitive probability (used to calculate the `roc_auc`). 
 
-```{r Short_model_comp, cache = FALSE}
+```{r Short_model_comp, cache = FALSE, warning = FALSE}
 wflows <- tribble(~wflow,
                   sln_wf,
                   knn_wf, log_wf, forest_wf, bt_wf)
@@ -1089,7 +1107,7 @@ final_wf <- xgboost_workflow %>% finalize_workflow(best_parms)
 ```
 
 We now need to forecast 3 months worth of `smoothed_deaths`.
-```{r forecast_smoothed, cache = TRUE}
+```{r forecast_smoothed, cache = TRUE, warning = FALSE}
 forecast <-
   weekly_data %>%
   filter(date >= "2020-03-15" & date <= start) %>%
@@ -1151,7 +1169,7 @@ test_unknown_fore <-
 ```
 
 We train our final workflow. 
-```{r train_xgboost, cache = TRUE}
+```{r train_xgboost, cache = TRUE, warning = FALSE}
 trained_wf <-
   final_wf %>%
   fit(train)
@@ -1161,7 +1179,7 @@ Now, we can create a tibble `tests` out of these 4 testing sets.
 We compare the performance of our four testing sets.
 We can see that the difference is not large and somehow our machine learning models have been able to have good performance with the forecasted deaths. 
 
-```{r}
+```{r message = FALSE}
 tests <-
   tribble(
     ~id, ~set,
@@ -1254,7 +1272,7 @@ clients<-read_feather("data/processed_data_20_12_23.feather")%>%
 ```
 
 Split our data into two part: train set (`2020-03-15` to `2020-12-27`) and test set (`2021-01-03` to `2021-06-27`).
-```{r}
+```{r message = FALSE}
   set.seed(1234)
   splits <-  clients %>% time_series_split(initial = "6 months", assess = "6 months", date_var = date, cumulative = TRUE)
   train = training(splits)
