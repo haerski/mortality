@@ -1142,10 +1142,10 @@ train <-
 
 For the purpose of comparison, we will have four types of testing sets:
 
- * `test_known_true`: include all known clients with dates 3 months after January 1 (known clients + testing dates) using the actual deaths for this 3 months period. 
- * `test_unknown_true`: include all unknown clients with dates 3 months after January 1 (unknown clients + testing dates) using the actual deaths for this 3 months period. 
- * `test_known_fore`: include all known clients with dates 3 months after January 1 (known clients + testing dates ) using the forecasted deaths for this 3 months period. 
- * `test_unknown_fore`: include all unknown clients with dates 3 months after January 1 (unknown clients + testing dates) using the forecasted deaths for this 3 months period.
+ * `test_known_true`: includes all known clients with dates 3 months after January 1 (known clients + testing dates) using the actual deaths for this 3 months period. 
+ * `test_unknown_true`: includes all unknown clients with dates 3 months after January 1 (unknown clients + testing dates) using the actual deaths for this 3 months period. 
+ * `test_known_fore`: includes all known clients with dates 3 months after January 1 (known clients + testing dates ) using the forecasted deaths for this 3 months period. 
+ * `test_unknown_fore`: includes all unknown clients with dates 3 months after January 1 (unknown clients + testing dates) using the forecasted deaths for this 3 months period.
 
 
 ```{r}
