@@ -1251,7 +1251,7 @@ In this section, we introduce some models that we tried but did not work as well
 
 We want to predict the `AE value` for each client for each week during COVID-19. Since the weekly AE value changes dramatically, we decide to predict the `shrunk AE`. For detail of shrunk AE, check the section on the short-term model. 
 
-Our main package in this section is `modeltime`, a framework time series models and machine learning. Since we have more than 500 clients, we have more than 500 time series. In practice, we will have more clients. We create a global machine learning model that forecasts all clients at once for computational efficiency. 
+Our main package in this section is `modeltime`, a framework for time series models and machine learning. Since we have more than 500 clients, we have more than 500 time series. In practice, we will have more clients. We create a global machine learning model that forecasts all clients at once for computational efficiency. 
 
 We use data before Covid-19 (based on the zip code where the company is located (such as poverty, education, unemployment levels) and characteristics of the company (such as the average age of its employees) as our predictors, and we compare results with IHME death data/with zip death data/without death data as predictors.
 
