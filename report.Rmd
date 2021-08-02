@@ -1931,8 +1931,8 @@ predclaim2%>%
 
 ## Why this model doesn't work
 
-1. The performance on classification whether the client is adverse or not adverse is worse than our long-time and short-time model. 
-2. Even this model is a global for all clients, it will take much more time than others.
+1. The performance on classification of whether the client is adverse or not adverse is worse than our long-time and short-time model. 
+2. Even this model is global for all clients, it will take much more time than others.
 3. It cannot predict new clients outside of the training set currently.
 
 ## Possible improvement for this model
