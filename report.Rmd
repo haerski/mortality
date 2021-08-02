@@ -1627,7 +1627,7 @@ result2 <- readRDS("resultwithoutdeath.rds")
 
 ## Visualize clients forecast
 
-We pick clients `7`, `10`, `61`, `100` as examples. We add the solid line `threshold = 2.5` to help us to see whether this client meet adverse mortality event.The exact AE is in the range of confidence interval. 
+We pick clients `7`, `10`, `61`, `100` as examples. We add the solid line `threshold = 2.5` to help us to see whether this client meet adverse mortality event. The exact AE is in the range of confidence interval. 
 ```{r warning = FALSE}
 result %>%
     group_by(client) %>%
