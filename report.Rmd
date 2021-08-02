@@ -656,13 +656,15 @@ trained_recipe <- trained_forest %>% extract_recipe
 train <- trained_recipe %>% bake(training(init))
 test <- trained_recipe %>% bake(testing(init))
 ```
-
-Below, we have the break-down plot of the client located in New York.
+Convert to an “explainer” object for later plot
 ```{r}
 ex <-
   explain(
     model = fit_parsnip,
     data = train)
+```
+Below, we have the break-down plot of the client located in New York.
+```{r}
 ex %>%
   predict_parts(train %>% slice(343)) %>%
   plot(digits = 2, max_features = 5, title = "Client 58, New York, Brooklyn")
