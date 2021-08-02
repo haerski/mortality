@@ -1,3 +1,16 @@
+---
+title: "Predicting Group Life Client Mortality during a Pandemic, final report"
+author: Team Outliers
+date: August 2, 2021
+output:
+  github_document:
+    toc: true
+    toc_depth: 2
+  pdf_document:
+    keep_tex: true
+---
+
+
 ```{r, setup, include=FALSE}
 knitr::opts_chunk$set(
       fig.path = "figures/report/fig-",
@@ -907,7 +920,7 @@ sln_wf <-
 
 We can take each of these models and evaluate their performance separately, but we want to find a way where we can compare their performance through time. So, we create a tibble containing the five different workflows, we fit out training set and we predict our `forecasted_test.` For the prediction, we use `class_predict` to come up with a class (this prediction will be used to calculate accuracy, sensitivity and specificity). We also use `prob_predict` to come up with a predicitive probability (used to calculate the `roc_auc`). 
 
-```{r Short_model_comp, cache = FALSE, warning = FALSE}
+```{r Short_model_comp, cache = FALSE, warning = FALSE, message = FALSE}
 wflows <- tribble(~wflow,
                   sln_wf,
                   knn_wf, log_wf, forest_wf, bt_wf)
@@ -1042,7 +1055,7 @@ ass_idx <-
   as.integer()
 
 spl <- make_splits(list(analysis = ana_idx, assessment = ass_idx), data = weekly_data)
-resmpl <- manual_rset(list(spl), c("foo"))
+resmpl <- manual_rset(list(spl), c("Manual split"))
 ```
 
 Now, we define our boosted trees. We remove the following from the list of predictors: `zip3`, `date`, `client`, `claims`, `zip_deaths`, `smoothed_ae`, `shrunk_ae`, `ae`.
@@ -1171,7 +1184,7 @@ test_unknown_fore <-
 ```
 
 We train our final workflow. 
-```{r train_xgboost, cache = TRUE, warning = FALSE}
+```{r train_xgboost, cache = TRUE, warning = FALSE, message = FALSE}
 trained_wf <-
   final_wf %>%
   fit(train)
