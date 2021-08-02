@@ -1,10 +1,9 @@
-Predicting Group Life Client Mortality during a Pandemic, final report
+Predicting Group Life Client Mortality during a Pandemic, Final Report
 ================
 Team Outliers
 August 2, 2021
 
--   [Predicting Group Life Client Mortality during a Pandemic, final
-    report](#predicting-group-life-client-mortality-during-a-pandemic-final-report)
+-   [Final report](#final-report)
 -   [Executive summary](#executive-summary)
 -   [Data wrangling](#data-wrangling)
     -   [Data sources](#data-sources)
@@ -40,7 +39,7 @@ August 2, 2021
 -   [Appendices](#appendices)
     -   [Data repository](#data-repository)
 
-# Predicting Group Life Client Mortality during a Pandemic, final report
+# Final report
 
 IMA Math-to-Industry Bootcamp, Securian Financial
 
@@ -1034,11 +1033,10 @@ weekly_data <-
 ```
 
 Then we shrink smoothed ae based on
-log (*V**o**l**u**m**e*⋅*a**v**e**r**a**g**e**q*<sub>*x*</sub>). This
-gives us some kind of a measure of client size and mortality. The
-motivation for this is that small clients that experience adverse
-mortality are much less impactful as large ones. We add the shrunk,
-smoothed AE to `weekly_data`.
+log (Volume⋅average *q*<sub>*x*</sub>). This gives us some kind of a
+measure of client size and mortality. The motivation for this is that
+small clients that experience adverse mortality are much less impactful
+as large ones. We add the shrunk, smoothed AE to `weekly_data`.
 
 ``` r
 client_shrinkage <-
@@ -1253,7 +1251,7 @@ wflows <-
   mutate(wflows_fit = map(wflow, ~ fit(.x, train))) 
 ```
 
-    ## [00:32:56] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+    ## [01:06:19] WARNING: amalgamation/../src/learner.cc:1095: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 
 ``` r
 wflows <-

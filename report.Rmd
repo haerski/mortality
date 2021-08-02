@@ -1,5 +1,5 @@
 ---
-title: "Predicting Group Life Client Mortality during a Pandemic, final report"
+title: "Predicting Group Life Client Mortality during a Pandemic, Final Report"
 author: Team Outliers
 date: August 2, 2021
 output:
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(
       fig.path = "figures/report/fig-",
       cache.path = "cache/report/")
 ```
-# Predicting Group Life Client Mortality during a Pandemic, final report
+# Final report
 IMA Math-to-Industry Bootcamp, Securian Financial
 
 Team members:
@@ -670,7 +670,7 @@ train <- trained_recipe %>% bake(training(init))
 test <- trained_recipe %>% bake(testing(init))
 ```
 Convert to an “explainer” object for later plot
-```{r}
+```{r message = FALSE, warning = FALSE}
 ex <-
   explain(
     model = fit_parsnip,
@@ -762,7 +762,7 @@ weekly_data <-
   drop_na()
 ```
 
-Then we shrink smoothed ae based on $\log(Volume \cdot average q_x)$. This gives us some kind of a measure of client size and mortality. The motivation for this is that small clients that experience adverse mortality are much less impactful as large ones.
+Then we shrink smoothed ae based on $\log(\text{Volume} \cdot \text{average } q_x)$. This gives us some kind of a measure of client size and mortality. The motivation for this is that small clients that experience adverse mortality are much less impactful as large ones.
 We add the shrunk, smoothed AE to `weekly_data`. 
 ```{r eval = FALSE}
 client_shrinkage <-
@@ -1227,7 +1227,7 @@ Breakdown plots can be used to visualize localized variable importance scores. F
 
 
 We explain how much each feature contributes to the value of a single prediction using the following. We will explain the plots after running the code. 
-```{r}
+```{r message = FALSE, warning = FALSE}
 model <-
   trained_wf %>%
   extract_fit_parsnip()
