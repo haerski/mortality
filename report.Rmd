@@ -774,8 +774,8 @@ weekly_data %>%
       `25` = quantile(shrunk_ae, 0.25),
       `50` = quantile(shrunk_ae, 0.50)
   ) %>%
-  pivot_longer(-date, names_to = "pth", values_to = "smoothed_ae") %>%
-  ggplot(aes(x = date, y = smoothed_ae, color = pth)) +
+  pivot_longer(-date, names_to = "pth", values_to = "shrunk_ae") %>%
+  ggplot(aes(x = date, y = shrunk_ae, color = pth)) +
   geom_line() +
   geom_hline(yintercept = 2.5, linetype = "dashed")
 ```
